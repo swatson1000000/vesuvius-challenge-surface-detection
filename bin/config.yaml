@@ -1,0 +1,53 @@
+# Configuration for Topology-Aware nnU-Net Training
+
+# Model architecture
+in_channels: 1
+out_channels: 1
+initial_filters: 32
+depth: 5
+
+# Training parameters
+batch_size: 2  # Adjust based on GPU memory
+num_epochs: 300
+learning_rate: 0.005  # Balanced: not too high (0.01) or low (0.001)
+weight_decay: 0.00001
+warmup_epochs: 10  # Longer warmup for stability with balanced sampling
+
+# Data parameters
+patch_size: [128, 128, 128]
+num_workers: 4
+
+# Cross-validation
+n_folds: 5
+
+# Loss weights (must sum to reasonable value)
+loss_weights:
+  dice_weight: 0.3  # Reduced - Dice alone isn't enough
+  focal_weight: 0.4  # Increased - better for imbalanced data
+  boundary_weight: 0.15
+  cldice_weight: 0.10
+  connectivity_weight: 0.05
+  
+# Focal loss parameters (for handling class imbalance)
+focal_gamma: 2.0  # Focus on hard examples
+focal_alpha: 0.34  # Weight for minority class (1 - avg_foreground_ratio)
+
+# Class weights for imbalance
+use_class_weights: true
+background_weight: 1.94  # 1 / (1 - 0.66) ≈ 2.94, normalized
+foreground_weight: 0.52  # 1 / 0.66 ≈ 1.52, normalized
+
+# Learning rate scheduler
+scheduler_patience: 5  # More aggressive - reduce LR faster if stuck
+scheduler_factor: 0.3  # Bigger reduction when plateau detected
+
+# Early stopping
+early_stopping_patience: 50
+
+# Post-processing (for validation)
+postprocess:
+  threshold: 0.5
+  min_component_size: 100
+  max_hole_size: 50
+  morphology_kernel_size: 2
+  separate_instances: false

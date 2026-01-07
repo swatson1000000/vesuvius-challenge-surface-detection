@@ -1,0 +1,109 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+*.mo
+*.pot
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# VSCode
+.vscode/
+
+# MacOS
+.DS_Store
+
+# Data directories (large files)
+train_images/
+train_labels/
+test_images/
+deprecated_train_images/
+deprecated_train_labels/
+
+# Model checkpoints and logs
+log/
+checkpoints/
+bin/checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.h5
+*.hdf5
+
+# Submission files
+submission.csv
+submissions/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Competition data
+*.zip
+*.tar.gz
+*.tgz
+test.csv
+train.csv
+
+# nnU-Net specific
+nnUNet_preprocessed/
+nnUNet_raw/
+nnUNet_trained_models/
+nnUNet_results/
+
+# Wandb
+wandb/
+
+# MLflow
+mlruns/
+
+# Tensorboard
+runs/
+
+# Cached data
+cache/
+*.cache
+
+# Output directories
+output/
+results/
+predictions/
