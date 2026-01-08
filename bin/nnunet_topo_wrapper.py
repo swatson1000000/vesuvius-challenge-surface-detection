@@ -121,7 +121,8 @@ class TopologyAwareTrainer:
                  optimizer: torch.optim.Optimizer,
                  device: torch.device,
                  loss_config: Optional[Dict] = None,
-                 checkpoint_dir: Optional[Path] = None):
+                 checkpoint_dir: Optional[Path] = None,
+                 warmup_epochs: int = 0):
         
         self.model = model.to(device)
         self.optimizer = optimizer
@@ -136,6 +137,8 @@ class TopologyAwareTrainer:
         # Training state
         self.current_epoch = 0
         self.best_val_score = 0.0
+        self.warmup_epochs = warmup_epochs
+        self.base_lr = optimizer.param_groups[0]['lr']
         
         # Setup logging
         logging.basicConfig(level=logging.INFO)
@@ -168,10 +171,14 @@ class TopologyAwareTrainer:
             # Backward pass
             loss.backward()
             
-            # Gradient clipping
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            # Gradient clipping (more aggressive for stability)
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=2.0)
             
             self.optimizer.step()
+            
+            # Log gradient norm periodically
+            if batch_idx % 50 == 0:
+                self.logger.info(f"Gradient norm: {grad_norm:.4f}")
             
             # Log losses
             for key, value in loss_components.items():
@@ -258,6 +265,18 @@ class TopologyAwareTrainer:
         for epoch in range(num_epochs):
             self.current_epoch = epoch
             
+            # Apply warmup learning rate schedule
+            if epoch < self.warmup_epochs:
+                warmup_factor = (epoch + 1) / self.warmup_epochs
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = self.base_lr * warmup_factor
+                self.logger.info(f"Warmup LR: {self.optimizer.param_groups[0]['lr']:.6f}")
+            elif epoch == self.warmup_epochs:
+                # Reset to base LR after warmup
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = self.base_lr
+                self.logger.info(f"Warmup complete. LR reset to: {self.base_lr:.6f}")
+            
             # Train
             train_losses = self.train_epoch(train_loader)
             self.logger.info(f"Epoch {epoch} Train - Loss: {train_losses['total']:.4f}")
@@ -266,8 +285,8 @@ class TopologyAwareTrainer:
             val_losses = self.validate(val_loader, metric_fn)
             self.logger.info(f"Epoch {epoch} Val - Loss: {val_losses['total']:.4f}")
             
-            # Learning rate scheduling
-            if scheduler:
+            # Learning rate scheduling (only after warmup)
+            if scheduler and epoch >= self.warmup_epochs:
                 if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                     scheduler.step(val_losses['total'])
                 else:
@@ -364,7 +383,8 @@ def create_model_and_trainer(config: Dict) -> Tuple[nn.Module, TopologyAwareTrai
         optimizer=optimizer,
         device=device,
         loss_config=loss_config,
-        checkpoint_dir=config.get('checkpoint_dir', 'checkpoints')
+        checkpoint_dir=config.get('checkpoint_dir', 'checkpoints'),
+        warmup_epochs=config.get('warmup_epochs', 0)
     )
     
     return model, trainer

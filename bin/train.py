@@ -303,6 +303,7 @@ def main(args):
         'depth': config.get('depth', 5),
         'learning_rate': config.get('learning_rate', 1e-3),
         'weight_decay': config.get('weight_decay', 1e-5),
+        'warmup_epochs': config.get('warmup_epochs', 0),
         'checkpoint_dir': f"checkpoints/fold_{args.fold}",
         **config.get('loss_weights', {})
     }
@@ -315,7 +316,7 @@ def main(args):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         trainer.optimizer,
         mode='min',
-        factor=0.5,
+        factor=config.get('scheduler_factor', 0.5),
         patience=config.get('scheduler_patience', 10)
     )
     

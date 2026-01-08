@@ -9,7 +9,7 @@ depth: 5
 # Training parameters
 batch_size: 2  # Adjust based on GPU memory
 num_epochs: 300
-learning_rate: 0.005  # Balanced: not too high (0.01) or low (0.001)
+learning_rate: 0.0001  # Reduced to 0.0001 for stability
 weight_decay: 0.00001
 warmup_epochs: 10  # Longer warmup for stability with balanced sampling
 
@@ -22,11 +22,11 @@ n_folds: 5
 
 # Loss weights (must sum to reasonable value)
 loss_weights:
-  dice_weight: 0.3  # Reduced - Dice alone isn't enough
-  focal_weight: 0.4  # Increased - better for imbalanced data
-  boundary_weight: 0.15
-  cldice_weight: 0.10
-  connectivity_weight: 0.05
+  dice_weight: 0.5  # Primary loss - overlap measure
+  focal_weight: 0.5  # Primary loss - handles imbalance
+  boundary_weight: 0.0  # Disabled temporarily
+  cldice_weight: 0.0   # Disabled temporarily
+  connectivity_weight: 0.0  # Disabled temporarily
   
 # Focal loss parameters (for handling class imbalance)
 focal_gamma: 2.0  # Focus on hard examples
@@ -38,8 +38,9 @@ background_weight: 1.94  # 1 / (1 - 0.66) ≈ 2.94, normalized
 foreground_weight: 0.52  # 1 / 0.66 ≈ 1.52, normalized
 
 # Learning rate scheduler
-scheduler_patience: 5  # More aggressive - reduce LR faster if stuck
-scheduler_factor: 0.3  # Bigger reduction when plateau detected
+scheduler_patience: 8  # Wait a bit longer before reducing
+scheduler_factor: 0.5  # Moderate reduction when plateau detected
+grad_clip_norm: 2.0  # Increased from 1.0 for better stability
 
 # Early stopping
 early_stopping_patience: 50
