@@ -3,15 +3,15 @@
 # Model architecture
 in_channels: 1
 out_channels: 1
-initial_filters: 32
-depth: 5
+initial_filters: 32  # Increased from 16 - larger model for better capacity
+depth: 4  # Keep at 4 for reasonable training time
 
 # Training parameters
 batch_size: 2  # Adjust based on GPU memory
 num_epochs: 300
-learning_rate: 0.0001  # Reduced to 0.0001 for stability
-weight_decay: 0.00001
-warmup_epochs: 10  # Longer warmup for stability with balanced sampling
+learning_rate: 0.0001  # CONSERVATIVE: stable starting point
+weight_decay: 0.01  # Standard weight decay
+warmup_epochs: 5  # Gradual warmup to prevent instability
 
 # Data parameters
 patch_size: [128, 128, 128]
@@ -20,27 +20,46 @@ num_workers: 4
 # Cross-validation
 n_folds: 5
 
-# Loss weights (must sum to reasonable value)
+# Loss weights - WITH VARIANCE REGULARIZATION
 loss_weights:
-  dice_weight: 0.5  # Primary loss - overlap measure
-  focal_weight: 0.5  # Primary loss - handles imbalance
-  boundary_weight: 0.0  # Disabled temporarily
-  cldice_weight: 0.0   # Disabled temporarily
-  connectivity_weight: 0.0  # Disabled temporarily
+  dice_weight: 0.4  # Dice for overlap
+  focal_weight: 0.2  # Focal for class imbalance
+  variance_weight: 0.2  # NEW: Prevent uniform predictions!
+  boundary_weight: 0.0  # DISABLED until stable
+  cldice_weight: 0.0  # DISABLED until stable
+  connectivity_weight: 0.0  # DISABLED until stable
   
 # Focal loss parameters (for handling class imbalance)
-focal_gamma: 2.0  # Focus on hard examples
-focal_alpha: 0.34  # Weight for minority class (1 - avg_foreground_ratio)
+focal_gamma: 2.0  # Standard focal loss gamma
+focal_alpha: 0.25  # Standard - weight for foreground (hard class)
 
-# Class weights for imbalance
+# Class weights for imbalance - CORRECTED
 use_class_weights: true
-background_weight: 1.94  # 1 / (1 - 0.66) ≈ 2.94, normalized
-foreground_weight: 0.52  # 1 / 0.66 ≈ 1.52, normalized
+background_weight: 2.94  # 1 / (1 - 0.66) for minority class
+foreground_weight: 1.52  # 1 / 0.66 for majority class
 
 # Learning rate scheduler
-scheduler_patience: 8  # Wait a bit longer before reducing
-scheduler_factor: 0.5  # Moderate reduction when plateau detected
-grad_clip_norm: 2.0  # Increased from 1.0 for better stability
+scheduler_type: "cosine_warm_restarts"  # Options: "plateau" or "cosine_warm_restarts"
+scheduler_patience: 10  # Give time to learn before reducing LR (for plateau)
+scheduler_factor: 0.5  # Standard reduction (for plateau)
+T_0: 10  # Initial cycle length for cosine warm restarts
+T_mult: 2  # Multiply cycle length after each restart
+eta_min: 0.000001  # Minimum LR for cosine annealing
+grad_clip_norm: 0.5  # AGGRESSIVE gradient clipping to prevent explosion
+
+# Stochastic Weight Averaging (SWA)
+swa_enabled: true
+swa_start_epoch: 40  # Start SWA after this epoch (changed from 50 to 40)
+swa_lr: 0.00005  # SWA learning rate (typically half of base LR)
+swa_update_freq: 5  # Update averaged model every N epochs
+
+# Weight noise injection (for plateau escape)
+noise_enabled: true
+noise_start_epoch: 30  # Start adding noise after this epoch
+noise_frequency: 10  # Add noise every N epochs
+noise_std: 0.001  # Noise standard deviation (0.1% of weights)
+noise_decay: 0.9  # Decay noise over time
+noise_target_layers: ['decoders', 'output']  # Only add noise to these layers
 
 # Early stopping
 early_stopping_patience: 50

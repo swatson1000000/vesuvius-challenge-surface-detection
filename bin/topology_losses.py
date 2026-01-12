@@ -191,7 +191,7 @@ class CombinedTopologyLoss(nn.Module):
     """
     Combined loss function optimized for the competition metrics
     
-    Loss = 0.4 * dice + 0.2 * focal + 0.2 * boundary + 0.1 * clDice + 0.1 * connectivity
+    Loss = weighted sum of dice + focal + boundary + clDice + connectivity + variance_reg
     """
     
     def __init__(self, 
@@ -200,8 +200,12 @@ class CombinedTopologyLoss(nn.Module):
                  boundary_weight=0.2,
                  cldice_weight=0.1,
                  connectivity_weight=0.1,
+                 variance_weight=0.1,
                  focal_alpha=0.25,
-                 focal_gamma=2.0):
+                 focal_gamma=2.0,
+                 use_class_weights=False,
+                 background_weight=1.0,
+                 foreground_weight=1.0):
         super().__init__()
         
         self.dice_weight = dice_weight
@@ -209,9 +213,14 @@ class CombinedTopologyLoss(nn.Module):
         self.boundary_weight = boundary_weight
         self.cldice_weight = cldice_weight
         self.connectivity_weight = connectivity_weight
+        self.variance_weight = variance_weight
         
         self.focal_alpha = focal_alpha
         self.focal_gamma = focal_gamma
+        
+        self.use_class_weights = use_class_weights
+        self.background_weight = background_weight
+        self.foreground_weight = foreground_weight
         
         # Initialize component losses
         self.cldice_loss = clDiceLoss()
@@ -219,17 +228,57 @@ class CombinedTopologyLoss(nn.Module):
         self.connectivity_loss = ConnectivityLoss()
         
     def dice_loss(self, pred, target, smooth=1e-5):
-        """Standard Dice loss"""
+        """Standard Dice loss with optional class weighting"""
         intersection = (pred * target).sum(dim=(2, 3, 4))
         union = pred.sum(dim=(2, 3, 4)) + target.sum(dim=(2, 3, 4))
         dice = (2.0 * intersection + smooth) / (union + smooth)
         return 1.0 - dice.mean()
     
+    def variance_regularization(self, pred):
+        """
+        Penalize low variance predictions to prevent uniform outputs
+        Encourages model to make discriminative predictions
+        """
+        # Compute variance of predictions across spatial dimensions
+        variance = pred.var(dim=(2, 3, 4)).mean()
+        
+        # Target variance for binary predictions is around 0.25 (for 50/50 split)
+        # Penalize if variance is too low (uniform predictions)
+        # Loss is high when variance is low
+        min_variance = 0.01  # Minimum acceptable variance
+        var_loss = torch.clamp(min_variance - variance, min=0.0) / min_variance
+        
+        return var_loss
+        union = pred.sum(dim=(2, 3, 4)) + target.sum(dim=(2, 3, 4))
+        dice = (2.0 * intersection + smooth) / (union + smooth)
+        return 1.0 - dice.mean()
+    
     def focal_loss(self, pred, target):
-        """Focal loss for handling class imbalance"""
-        bce = F.binary_cross_entropy(pred, target, reduction='none')
-        pt = torch.exp(-bce)
-        focal = self.focal_alpha * (1 - pt) ** self.focal_gamma * bce
+        """Focal loss for handling class imbalance with proper alpha weighting"""
+        # Clamp predictions to avoid log(0)
+        pred = torch.clamp(pred, 1e-7, 1 - 1e-7)
+        
+        # Compute per-pixel cross entropy
+        ce_loss = -(target * torch.log(pred) + (1 - target) * torch.log(1 - pred))
+        
+        # Compute pt (prediction probability for true class)
+        pt = target * pred + (1 - target) * (1 - pred)
+        
+        # Apply focal term (1 - pt)^gamma
+        focal_weight = (1 - pt) ** self.focal_gamma
+        
+        # Apply alpha balancing (alpha for foreground, 1-alpha for background)
+        # Alpha should weight the MINORITY class more heavily
+        alpha_weight = target * self.focal_alpha + (1 - target) * (1 - self.focal_alpha)
+        
+        # Combine
+        focal = alpha_weight * focal_weight * ce_loss
+        
+        # Apply class weights if enabled
+        if self.use_class_weights:
+            class_weight = target * self.foreground_weight + (1 - target) * self.background_weight
+            focal = focal * class_weight
+        
         return focal.mean()
     
     def forward(self, pred, target):
@@ -249,6 +298,7 @@ class CombinedTopologyLoss(nn.Module):
         loss_boundary = self.boundary_loss(pred, target)
         loss_cldice = self.cldice_loss(pred, target)
         loss_connectivity = self.connectivity_loss(pred, target)
+        loss_variance = self.variance_regularization(pred)
         
         # Combine losses
         total_loss = (
@@ -256,7 +306,8 @@ class CombinedTopologyLoss(nn.Module):
             self.focal_weight * loss_focal +
             self.boundary_weight * loss_boundary +
             self.cldice_weight * loss_cldice +
-            self.connectivity_weight * loss_connectivity
+            self.connectivity_weight * loss_connectivity +
+            self.variance_weight * loss_variance
         )
         
         # Return total loss and components for logging
@@ -266,6 +317,7 @@ class CombinedTopologyLoss(nn.Module):
             'boundary': loss_boundary.item(),
             'cldice': loss_cldice.item(),
             'connectivity': loss_connectivity.item(),
+            'variance': loss_variance.item(),
             'total': total_loss.item()
         }
 

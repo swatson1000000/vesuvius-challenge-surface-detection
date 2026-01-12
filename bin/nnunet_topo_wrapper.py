@@ -154,7 +154,8 @@ class TopologyAwareTrainer:
             'focal': [],
             'boundary': [],
             'cldice': [],
-            'connectivity': []
+            'connectivity': [],
+            'variance': []
         }
         
         for batch_idx, batch in enumerate(train_loader):
@@ -205,7 +206,8 @@ class TopologyAwareTrainer:
             'focal': [],
             'boundary': [],
             'cldice': [],
-            'connectivity': []
+            'connectivity': [],
+            'variance': []
         }
         
         all_predictions = []
@@ -248,9 +250,21 @@ class TopologyAwareTrainer:
               num_epochs: int,
               scheduler=None,
               metric_fn=None,
-              early_stopping_patience: int = 50):
+              early_stopping_patience: int = 50,
+              plateau_patience: int = 3,
+              plateau_threshold: float = 0.002,
+              substantial_progress_threshold: float = 0.5,
+              swa_model=None,
+              swa_scheduler=None,
+              swa_start_epoch: int = 50,
+              noise_enabled: bool = False,
+              noise_start_epoch: int = 30,
+              noise_frequency: int = 10,
+              noise_std: float = 0.001,
+              noise_decay: float = 0.9,
+              noise_target_layers: list = None):
         """
-        Full training loop
+        Full training loop with adaptive plateau detection, SWA, and weight noise
         
         Args:
             train_loader: Training data loader
@@ -259,8 +273,28 @@ class TopologyAwareTrainer:
             scheduler: Learning rate scheduler
             metric_fn: Function to compute competition metrics
             early_stopping_patience: Epochs to wait before early stopping
+            plateau_patience: Epochs to wait before declaring plateau
+            plateau_threshold: Minimum improvement to avoid plateau detection
+            substantial_progress_threshold: Fraction of improvement from baseline to disable interventions (default 0.5 = 50%)
+            swa_model: Stochastic Weight Averaging model (optional)
+            swa_scheduler: SWA learning rate scheduler (optional)
+            swa_start_epoch: Epoch to start SWA
+            noise_enabled: Whether to inject weight noise
+            noise_start_epoch: Epoch to start noise injection
+            noise_frequency: Apply noise every N epochs
+            noise_std: Standard deviation of noise
+            noise_decay: Decay factor for noise over time
+            noise_target_layers: List of layer name patterns to add noise to
         """
+        if noise_target_layers is None:
+            noise_target_layers = ['decoders', 'output']
+        
         patience_counter = 0
+        plateau_counter = 0
+        last_best_loss = float('inf')
+        baseline_loss = None  # Track starting loss for substantial progress detection
+        intervention_count = 0
+        max_interventions = 3
         
         for epoch in range(num_epochs):
             self.current_epoch = epoch
@@ -277,17 +311,52 @@ class TopologyAwareTrainer:
                     param_group['lr'] = self.base_lr
                 self.logger.info(f"Warmup complete. LR reset to: {self.base_lr:.6f}")
             
+            # Apply weight noise injection (Phase 3 - Constrained Exploration)
+            if noise_enabled and epoch >= noise_start_epoch and epoch % noise_frequency == 0:
+                current_noise_std = noise_std * (noise_decay ** ((epoch - noise_start_epoch) // noise_frequency))
+                self.add_weight_noise(current_noise_std, noise_target_layers)
+                self.logger.info(f"🎲 Applied weight noise (std={current_noise_std:.6f}) to escape plateau")
+            
             # Train
             train_losses = self.train_epoch(train_loader)
-            self.logger.info(f"Epoch {epoch} Train - Loss: {train_losses['total']:.4f}")
+            self.logger.info(
+                f"Epoch {epoch} Train - Loss: {train_losses['total']:.4f} "
+                f"(dice: {train_losses['dice']:.4f}, focal: {train_losses['focal']:.4f}, "
+                f"variance: {train_losses['variance']:.4f})"
+            )
             
             # Validate
             val_losses = self.validate(val_loader, metric_fn)
-            self.logger.info(f"Epoch {epoch} Val - Loss: {val_losses['total']:.4f}")
+            self.logger.info(
+                f"Epoch {epoch} Val - Loss: {val_losses['total']:.4f} "
+                f"(dice: {val_losses['dice']:.4f}, focal: {val_losses['focal']:.4f}, "
+                f"variance: {val_losses['variance']:.4f})"
+            )
+            
+            # Set baseline loss on first epoch for substantial progress detection
+            current_val_loss = val_losses['total']
+            if baseline_loss is None:
+                baseline_loss = current_val_loss
+                self.logger.info(f"📊 Baseline loss set: {baseline_loss:.4f}")
+            
+            # Check for substantial progress (disable interventions if achieved)
+            improvement_fraction = (baseline_loss - current_val_loss) / baseline_loss
+            has_substantial_progress = improvement_fraction > substantial_progress_threshold
+            
+            if has_substantial_progress and intervention_count == 0:
+                self.logger.info(f"🎯 SUBSTANTIAL PROGRESS ACHIEVED: {improvement_fraction*100:.1f}% improvement from baseline!")
+                self.logger.info(f"   Baseline: {baseline_loss:.4f} → Current: {current_val_loss:.4f}")
+                self.logger.info(f"   Interventions disabled - model is learning well!")
             
             # Learning rate scheduling (only after warmup)
             if scheduler and epoch >= self.warmup_epochs:
-                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                # Update SWA if enabled and past start epoch
+                if swa_model is not None and epoch >= swa_start_epoch:
+                    swa_model.update_parameters(self.model)
+                    swa_scheduler.step()
+                    if epoch == swa_start_epoch:
+                        self.logger.info(f"🔄 Started SWA at epoch {epoch}")
+                elif isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                     scheduler.step(val_losses['total'])
                 else:
                     scheduler.step()
@@ -305,6 +374,27 @@ class TopologyAwareTrainer:
             else:
                 patience_counter += 1
             
+            # Plateau detection
+            improvement = last_best_loss - current_val_loss
+            if improvement > plateau_threshold:
+                last_best_loss = current_val_loss
+                plateau_counter = 0
+            else:
+                plateau_counter += 1
+            
+            # Adaptive intervention when plateau detected
+            # BUT: Skip if substantial progress already achieved (model is learning well!)
+            if plateau_counter >= plateau_patience and intervention_count < max_interventions:
+                if has_substantial_progress:
+                    self.logger.info(f"ℹ️  Plateau detected but SKIPPING intervention (substantial progress: {improvement_fraction*100:.1f}%)")
+                    plateau_counter = 0  # Reset counter to avoid repeated logging
+                else:
+                    self.logger.warning(f"⚠️  PLATEAU DETECTED after {plateau_counter} epochs with no improvement!")
+                    self.logger.warning(f"   Current improvement from baseline: {improvement_fraction*100:.1f}% (threshold: {substantial_progress_threshold*100:.0f}%)")
+                    self._handle_plateau(epoch, intervention_count)
+                    intervention_count += 1
+                    plateau_counter = 0  # Reset counter after intervention
+            
             # Regular checkpoint
             if epoch % 10 == 0:
                 self.save_checkpoint(f'checkpoint_epoch_{epoch}.pth')
@@ -315,6 +405,96 @@ class TopologyAwareTrainer:
                 break
         
         self.logger.info(f"Training complete! Best score: {self.best_val_score:.4f}")
+    
+    def _handle_plateau(self, epoch: int, intervention_num: int):
+        """
+        Handle training plateau with adaptive intervention strategies
+        
+        Intervention sequence:
+        1. Increase LR + disable complex topology losses
+        2. Further increase LR + simplify to focal only
+        3. Reset optimizer + use dice only
+        """
+        self.logger.warning(f"🔧 Applying intervention #{intervention_num + 1}")
+        
+        if intervention_num == 0:
+            # First intervention: Increase LR 10x, disable boundary/cldice/connectivity
+            new_lr = self.base_lr * 10
+            self.logger.warning(f"→ Increasing LR: {self.base_lr:.6f} → {new_lr:.6f}")
+            self.logger.warning(f"→ Disabling complex topology losses (boundary, clDice, connectivity)")
+            
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = new_lr
+            self.base_lr = new_lr
+            
+            # Disable complex losses
+            if hasattr(self.criterion, 'boundary_weight'):
+                self.criterion.boundary_weight = 0.0
+                self.criterion.cldice_weight = 0.0
+                self.criterion.connectivity_weight = 0.0
+                self.logger.warning(f"→ Loss weights: Dice={self.criterion.dice_weight:.2f}, "
+                                   f"Focal={self.criterion.focal_weight:.2f}")
+        
+        elif intervention_num == 1:
+            # Second intervention: Further increase LR 5x, use focal loss only
+            new_lr = self.base_lr * 5
+            self.logger.warning(f"→ Further increasing LR: {self.base_lr:.6f} → {new_lr:.6f}")
+            self.logger.warning(f"→ Switching to FOCAL LOSS ONLY")
+            
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = new_lr
+            self.base_lr = new_lr
+            
+            # Focal loss only
+            if hasattr(self.criterion, 'dice_weight'):
+                self.criterion.dice_weight = 0.0
+                self.criterion.focal_weight = 1.0
+                self.criterion.boundary_weight = 0.0
+                self.criterion.cldice_weight = 0.0
+                self.criterion.connectivity_weight = 0.0
+                self.logger.warning(f"→ Loss weights: Focal=1.0, all others=0.0")
+        
+        elif intervention_num == 2:
+            # Third intervention: Reset optimizer with 3x LR boost, use dice loss only
+            new_lr = self.base_lr * 3
+            self.logger.warning(f"→ Resetting optimizer state with LR boost: {self.base_lr:.6f} → {new_lr:.6f}")
+            self.logger.warning(f"→ Switching to DICE LOSS ONLY")
+            
+            # Reset optimizer with boosted LR
+            self.optimizer = torch.optim.AdamW(
+                self.model.parameters(),
+                lr=new_lr,
+                weight_decay=0.01
+            )
+            self.base_lr = new_lr
+            
+            # Dice loss only
+            if hasattr(self.criterion, 'dice_weight'):
+                self.criterion.dice_weight = 1.0
+                self.criterion.focal_weight = 0.0
+                self.criterion.boundary_weight = 0.0
+                self.criterion.cldice_weight = 0.0
+                self.criterion.connectivity_weight = 0.0
+                self.logger.warning(f"→ Loss weights: Dice=1.0, all others=0.0")
+        
+        self.logger.warning(f"✓ Intervention complete. Continuing training...")
+    
+    def add_weight_noise(self, noise_std=0.001, target_layers=['decoders', 'output']):
+        """
+        Add Gaussian noise to specified layers for constrained exploration
+        
+        Args:
+            noise_std: Standard deviation of Gaussian noise
+            target_layers: List of layer name patterns to add noise to
+        """
+        with torch.no_grad():
+            noise_count = 0
+            for name, param in self.model.named_parameters():
+                if any(layer in name for layer in target_layers):
+                    noise = torch.randn_like(param) * noise_std
+                    param.add_(noise)
+                    noise_count += 1
+        self.logger.info(f"   Added noise (std={noise_std:.6f}) to {noise_count} parameter tensors in {target_layers}")
     
     def save_checkpoint(self, filename: str):
         """Save model checkpoint"""
@@ -375,7 +555,12 @@ def create_model_and_trainer(config: Dict) -> Tuple[nn.Module, TopologyAwareTrai
         'focal_weight': config.get('focal_weight', 0.2),
         'boundary_weight': config.get('boundary_weight', 0.2),
         'cldice_weight': config.get('cldice_weight', 0.1),
-        'connectivity_weight': config.get('connectivity_weight', 0.1)
+        'connectivity_weight': config.get('connectivity_weight', 0.1),
+        'focal_alpha': config.get('focal_alpha', 0.25),
+        'focal_gamma': config.get('focal_gamma', 2.0),
+        'use_class_weights': config.get('use_class_weights', False),
+        'background_weight': config.get('background_weight', 1.0),
+        'foreground_weight': config.get('foreground_weight', 1.0)
     }
     
     trainer = TopologyAwareTrainer(

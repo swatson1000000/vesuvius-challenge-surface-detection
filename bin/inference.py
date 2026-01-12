@@ -68,8 +68,8 @@ class InferencePipeline:
         model = TopologyAwareUNet3D(
             in_channels=1,
             out_channels=1,
-            initial_filters=32,
-            depth=5
+            initial_filters=16,
+            depth=4
         )
         
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -224,6 +224,9 @@ class InferencePipeline:
             
             # Predict
             pred = self.model(patch_tensor)
+            
+            # Apply sigmoid to convert logits to probabilities
+            pred = torch.sigmoid(pred)
             
             # Remove batch and channel dimensions
             pred = pred[0, 0].cpu().numpy()

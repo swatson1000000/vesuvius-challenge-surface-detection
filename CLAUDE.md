@@ -1,5 +1,19 @@
 # Claude AI Instructions
 
+## Critical Training Fix (Jan 2026)
+
+**IMPORTANT**: Previous training had a fundamental bug causing uniform predictions. See `TRAINING_FIX.md` for details.
+
+**Fixed issues**:
+1. Added variance regularization loss (weight=0.2) to prevent uniform outputs
+2. Increased model capacity (initial_filters: 16→32, ~22M parameters)
+3. Rebalanced loss weights (dice=0.4, focal=0.2, variance=0.2)
+
+**Monitor these during training**:
+- Variance loss component (should decrease from >0.5 to <0.1)
+- Prediction variance in logs (should be >0.01, not 0.00001)
+- Training should NOT plateau at 0.072 like before
+
 ## Environment Setup
 
 **ALWAYS** use the `phi4` conda environment for all training and inference operations.

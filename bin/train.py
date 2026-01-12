@@ -216,48 +216,19 @@ def load_dataset(data_dir: Path, fold: int = 0, n_folds: int = 5) -> Tuple[List,
     return (train_images, train_labels), (val_images, val_labels)
 
 
-def main(args):
-    """Main training function"""
-    
-    # Record start time
-    start_time = datetime.now()
-    start_timestamp = time.time()
-    
-    # Setup logging with flush enabled for incremental display
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(f'training_fold{args.fold}.log', mode='a'),
-            logging.StreamHandler(sys.stdout)
-        ],
-        force=True
-    )
-    
-    # Ensure unbuffered output
-    sys.stdout.reconfigure(line_buffering=True)
-    
-    logger = logging.getLogger(__name__)
+def train_single_fold(fold: int, config: dict, data_dir: Path, device: torch.device, logger):
+    """Train a single fold"""
     
     logger.info("="*80)
-    logger.info(f"Training started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"STARTING FOLD {fold}")
     logger.info("="*80)
     
-    # Load config
-    with open(args.config, 'r') as f:
-        config = yaml.safe_load(f)
+    fold_start_time = time.time()
     
-    logger.info(f"Configuration: {config}")
-    
-    # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info(f"Using device: {device}")
-    
-    # Load dataset
-    data_dir = Path(args.data_dir)
+    # Load dataset for this fold
     (train_images, train_labels), (val_images, val_labels) = load_dataset(
         data_dir, 
-        fold=args.fold, 
+        fold=fold, 
         n_folds=config.get('n_folds', 5)
     )
     
@@ -304,7 +275,7 @@ def main(args):
         'learning_rate': config.get('learning_rate', 1e-3),
         'weight_decay': config.get('weight_decay', 1e-5),
         'warmup_epochs': config.get('warmup_epochs', 0),
-        'checkpoint_dir': f"checkpoints/fold_{args.fold}",
+        'checkpoint_dir': f"checkpoints/fold_{fold}",
         **config.get('loss_weights', {})
     }
     
@@ -312,25 +283,159 @@ def main(args):
     
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
-    # Create scheduler
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        trainer.optimizer,
-        mode='min',
-        factor=config.get('scheduler_factor', 0.5),
-        patience=config.get('scheduler_patience', 10)
-    )
+    # Create scheduler based on config
+    scheduler_type = config.get('scheduler_type', 'plateau')
+    if scheduler_type == 'cosine_warm_restarts':
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            trainer.optimizer,
+            T_0=config.get('T_0', 10),
+            T_mult=config.get('T_mult', 2),
+            eta_min=config.get('eta_min', 1e-6)
+        )
+        logger.info(f"Using CosineAnnealingWarmRestarts scheduler (T_0={config.get('T_0', 10)}, T_mult={config.get('T_mult', 2)})")
+    else:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            trainer.optimizer,
+            mode='min',
+            factor=config.get('scheduler_factor', 0.5),
+            patience=config.get('scheduler_patience', 10)
+        )
+        logger.info("Using ReduceLROnPlateau scheduler")
+    
+    # Setup Stochastic Weight Averaging (SWA) if enabled
+    swa_model = None
+    swa_scheduler = None
+    if config.get('swa_enabled', False):
+        from torch.optim.swa_utils import AveragedModel, SWALR
+        swa_model = AveragedModel(model)
+        swa_scheduler = SWALR(trainer.optimizer, swa_lr=config.get('swa_lr', 0.00005))
+        swa_start = config.get('swa_start_epoch', 40)  # Changed from 50 to 40
+        logger.info(f"SWA enabled: will start at epoch {swa_start} with LR {config.get('swa_lr', 0.00005)}")
     
     # Train
-    logger.info("Starting training...")
+    logger.info(f"Starting training for fold {fold}...")
     sys.stdout.flush()
+    
+    # Pass SWA and noise config to trainer
+    trainer_config = {
+        'swa_model': swa_model,
+        'swa_scheduler': swa_scheduler,
+        'swa_start_epoch': config.get('swa_start_epoch', 40),  # Changed from 50 to 40
+        'noise_enabled': config.get('noise_enabled', False),
+        'noise_start_epoch': config.get('noise_start_epoch', 30),
+        'noise_frequency': config.get('noise_frequency', 10),
+        'noise_std': config.get('noise_std', 0.001),
+        'noise_decay': config.get('noise_decay', 0.9),
+        'noise_target_layers': config.get('noise_target_layers', ['decoders', 'output'])
+    }
     
     trainer.train(
         train_loader=train_loader,
         val_loader=val_loader,
         num_epochs=config.get('num_epochs', 300),
         scheduler=scheduler,
-        early_stopping_patience=config.get('early_stopping_patience', 50)
+        early_stopping_patience=config.get('early_stopping_patience', 50),
+        **trainer_config
     )
+    
+    # Finalize SWA if used
+    if swa_model is not None:
+        logger.info("Finalizing SWA model (updating batch norm statistics)...")
+        from torch.optim.swa_utils import update_bn
+        update_bn(train_loader, swa_model, device=device)
+        # Save SWA model
+        swa_checkpoint_path = Path(f"checkpoints/fold_{fold}/swa_model.pth")
+        torch.save({
+            'model_state_dict': swa_model.module.state_dict(),
+            'config': config
+        }, swa_checkpoint_path)
+        logger.info(f"SWA model saved to {swa_checkpoint_path}")
+    
+    # Record fold end time
+    fold_elapsed = time.time() - fold_start_time
+    
+    logger.info("="*80)
+    logger.info(f"Fold {fold} complete!")
+    logger.info(f"Fold {fold} time: {fold_elapsed:.2f} seconds ({fold_elapsed/3600:.2f} hours)")
+    logger.info("="*80)
+    sys.stdout.flush()
+    
+    return fold_elapsed
+
+
+def main(args):
+    """Main training function - runs all folds sequentially"""
+    
+    # Ensure immediate output
+    print("=" * 80, flush=True)
+    print(f"STARTING MULTI-FOLD TRAINING - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+    print("=" * 80, flush=True)
+    
+    # Record start time
+    start_time = datetime.now()
+    start_timestamp = time.time()
+    
+    # Setup logging with flush enabled for incremental display
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ],
+        force=True
+    )
+    
+    # Ensure unbuffered output
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stdout.flush()
+    
+    logger = logging.getLogger(__name__)
+    
+    logger.info("="*80)
+    logger.info(f"Training started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("="*80)
+    
+    # Load config
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    logger.info(f"Configuration: {config}")
+    
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Using device: {device}")
+    
+    # Get data directory
+    data_dir = Path(args.data_dir)
+    
+    # Determine which folds to run
+    n_folds = config.get('n_folds', 5)
+    if args.fold == -1:
+        # Run all folds
+        folds_to_run = list(range(n_folds))
+        logger.info(f"Running all {n_folds} folds")
+    else:
+        # Run single fold
+        folds_to_run = [args.fold]
+        logger.info(f"Running single fold: {args.fold}")
+    
+    # Track fold results
+    fold_results = {}
+    
+    # Train each fold
+    for fold in folds_to_run:
+        try:
+            fold_time = train_single_fold(fold, config, data_dir, device, logger)
+            fold_results[fold] = {'status': 'completed', 'time': fold_time}
+            logger.info(f"✓ Fold {fold} completed successfully in {fold_time/3600:.2f} hours")
+        except Exception as e:
+            fold_results[fold] = {'status': 'failed', 'error': str(e)}
+            logger.error(f"✗ Fold {fold} failed with error: {e}")
+            if not args.continue_on_error:
+                logger.error("Stopping due to fold failure (use --continue-on-error to continue)")
+                break
+            else:
+                logger.info("Continuing to next fold despite error...")
     
     # Record end time
     end_time = datetime.now()
@@ -338,10 +443,18 @@ def main(args):
     elapsed_time = end_timestamp - start_timestamp
     
     logger.info("="*80)
-    logger.info("Training complete!")
+    logger.info("ALL FOLDS COMPLETE!")
     logger.info(f"Start time:   {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"End time:     {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"Total time:   {elapsed_time:.2f} seconds ({elapsed_time/3600:.2f} hours)")
+    logger.info("="*80)
+    logger.info("")
+    logger.info("Fold Summary:")
+    for fold, result in fold_results.items():
+        if result['status'] == 'completed':
+            logger.info(f"  Fold {fold}: ✓ Completed in {result['time']/3600:.2f} hours")
+        else:
+            logger.info(f"  Fold {fold}: ✗ Failed - {result['error']}")
     logger.info("="*80)
     sys.stdout.flush()
 
@@ -353,8 +466,10 @@ if __name__ == "__main__":
     parser.add_argument('--data_dir', type=str, 
                        default='/home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection',
                        help='Path to data directory')
-    parser.add_argument('--fold', type=int, default=0,
-                       help='Fold number for cross-validation')
+    parser.add_argument('--fold', type=int, default=-1,
+                       help='Fold number for cross-validation (use -1 to run all folds)')
+    parser.add_argument('--continue-on-error', action='store_true',
+                       help='Continue to next fold if one fails')
     
     args = parser.parse_args()
     main(args)

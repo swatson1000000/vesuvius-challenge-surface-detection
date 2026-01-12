@@ -1,0 +1,57 @@
+================================================================================
+DIAGNOSTIC: Investigating Training Failure
+================================================================================
+
+1. Dataset Check:
+   Images found: 786
+   Labels found: 786
+
+2. Sample Data:
+   Image: (320, 320, 320), dtype=uint8, range=[0, 255]
+   Label: (320, 320, 320), dtype=uint8, range=[0, 2]
+   Label unique values: [0 1 2]
+   Foreground ratio: 0.7537 (75.37%)
+   Background ratio: 0.2463 (24.63%)
+   Normalized image range: [0.0000, 1.0000]
+
+3. Model Architecture:
+   Total parameters: 5,644,913
+   Initial filters: 16
+   Depth: 4
+
+4. Test Patch:
+   Image patch: (128, 128, 128), range=[0.0000, 1.0000]
+   Label patch: (128, 128, 128), foreground=0.9577
+
+5. Model Output (untrained):
+   Logits: range=[0.0745, 0.9236], mean=0.4917
+   Probs: range=[0.5186, 0.7158], mean=0.6203
+
+6. Loss Function Tests:
+   Perfect prediction loss: 0.000000
+   All zeros loss: 2.429468
+   All ones loss: 0.263902
+   Uniform 0.6 loss: 0.146136
+   Uniform 0.96 loss: 0.067216
+
+7. Loss Analysis:
+   Training plateaued at: 0.072
+   Uniform prediction gives: 0.146136
+   Ratio match prediction gives: 0.067216
+   >>> FOUND IT! Model learned to output foreground ratio everywhere!
+
+8. CRITICAL ISSUE DETECTED:
+   Labels contain values: [0 1 2]
+   But model expects binary (0, 1)!
+   Label value 2 count: 23298455 voxels (71.10%)
+   This could be causing confusion in the loss function!
+
+9. Trained Model on Same Patch:
+   Logits: range=[0.3506, 0.4775]
+   Probs: range=[0.5868, 0.6172], mean=0.6011, std=0.0028
+   Loss: 0.145772
+   Prediction variance: 0.000008 (should be >> 0 for good segmentation)
+
+================================================================================
+DIAGNOSIS COMPLETE
+================================================================================

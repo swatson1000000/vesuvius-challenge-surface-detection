@@ -1,0 +1,82 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    QUICK START: TRAIN REMAINING FOLDS                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+🚀 SIMPLEST METHOD (Recommended):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+cd /home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/bin
+./quick_train_all.sh
+
+⏱️  Estimated time: ~55 hours for all 5 folds (or ~44 hours for folds 1-4)
+
+
+📊 WHAT CHANGED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Early stopping now automatically continues to next fold
+✅ SWA starts at epoch 40 (was 50) - gets used before early stopping
+✅ Single command runs all folds
+✅ Comprehensive progress tracking and summary
+
+
+🎯 KEY COMMANDS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1️⃣  Run All Folds (0-4):
+    cd bin && python train.py --fold -1 --continue-on-error
+
+2️⃣  Run Single Fold:
+    python train.py --fold 3  # Run only fold 3
+
+3️⃣  Monitor Progress:
+    tail -f ../log/train_all_folds_*.log | grep "FOLD\|complete"
+
+4️⃣  Check GPU:
+    watch -n 5 nvidia-smi
+
+
+📁 OUTPUT FILES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Log file:       log/train_all_folds_YYYYMMDD_HHMMSS.log
+Checkpoints:    bin/checkpoints/fold_0/ through fold_4/
+SWA models:     bin/checkpoints/fold_N/swa_model.pth
+
+
+💡 TIPS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Training auto-continues after early stopping - no manual intervention!
+• Each fold takes ~11 hours based on fold 0
+• --continue-on-error flag keeps going even if one fold fails
+• Press Ctrl+Z then 'bg' to background the process if needed
+• Use 'nohup ./quick_train_all.sh &' to run in background from start
+
+
+📋 FOLD 0 RESULTS (Baseline):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Epochs: 50 (early stopped)
+• Time: 10.83 hours
+• Val Loss: 0.0851
+• Dice Score: 0.5807
+• Improvement: 60.3% loss reduction, 22.6% dice improvement
+
+
+🔍 TROUBLESHOOTING:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Issue: "Module not found"
+→ conda activate phi4
+
+Issue: Out of memory
+→ Edit config.yaml: batch_size: 1
+
+Issue: Want to stop training
+→ Ctrl+C (gracefully stops current epoch)
+
+Issue: Training seems stuck
+→ Check log file for errors
+→ Check GPU with nvidia-smi
+
+
+📖 MORE INFO:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Full guide: TRAINING_FOLDS_GUIDE.md
+• Change details: TRAINING_UPDATE_SUMMARY.md
+• Original training notes: TRAINING_FIX.md
