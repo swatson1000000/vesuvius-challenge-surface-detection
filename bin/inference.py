@@ -68,7 +68,7 @@ class InferencePipeline:
         model = TopologyAwareUNet3D(
             in_channels=1,
             out_channels=1,
-            initial_filters=16,
+            initial_filters=32,
             depth=4
         )
         
@@ -77,7 +77,11 @@ class InferencePipeline:
         
         self.logger.info(f"Loaded model from {model_path}")
         self.logger.info(f"  Epoch: {checkpoint.get('epoch', 'N/A')}")
-        self.logger.info(f"  Best val score: {checkpoint.get('best_val_score', 'N/A'):.4f}")
+        best_val = checkpoint.get('best_val_score', 'N/A')
+        if isinstance(best_val, (int, float)):
+            self.logger.info(f"  Best val score: {best_val:.4f}")
+        else:
+            self.logger.info(f"  Best val score: {best_val}")
         
         return model
     
