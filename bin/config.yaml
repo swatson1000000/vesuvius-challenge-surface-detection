@@ -20,18 +20,21 @@ num_workers: 4
 # Cross-validation
 n_folds: 5
 
-# Loss weights - WITH VARIANCE REGULARIZATION
+# Loss weights - REBALANCED TO FIX FOREGROUND BIAS
+# Previous: 99.88% FG vs 57.70% training labels (+42% overestimation)
+# Fix: Increase focal + variance to penalize overconfident FG predictions
 loss_weights:
-  dice_weight: 0.4  # Dice for overlap
-  focal_weight: 0.2  # Focal for class imbalance
-  variance_weight: 0.2  # NEW: Prevent uniform predictions!
-  boundary_weight: 0.0  # DISABLED until stable
-  cldice_weight: 0.0  # DISABLED until stable
-  connectivity_weight: 0.0  # DISABLED until stable
+  dice_weight: 0.2        # Reduce from 0.4 - dice encourages high overlap
+  focal_weight: 0.4       # Increase from 0.2 - focus on hard negatives (background)
+  variance_weight: 0.3    # Increase from 0.2 - force uncertainty, reduce overconfidence
+  boundary_weight: 0.05   # ENABLE: surface quality matters
+  cldice_weight: 0.05     # ENABLE: topology awareness
+  connectivity_weight: 0.0  # Keep disabled for now
   
 # Focal loss parameters (for handling class imbalance)
+# Adjusted to focus more on background (hard negatives)
 focal_gamma: 2.0  # Standard focal loss gamma
-focal_alpha: 0.25  # Standard - weight for foreground (hard class)
+focal_alpha: 0.75  # Weight BACKGROUND heavily (inverse of FG foreground fraction ~0.66)
 
 # Class weights for imbalance - CORRECTED
 use_class_weights: true

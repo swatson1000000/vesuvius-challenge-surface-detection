@@ -201,6 +201,7 @@ class CombinedTopologyLoss(nn.Module):
                  cldice_weight=0.1,
                  connectivity_weight=0.1,
                  variance_weight=0.1,
+                 entropy_weight=0.05,
                  focal_alpha=0.25,
                  focal_gamma=2.0,
                  use_class_weights=False,
@@ -214,6 +215,7 @@ class CombinedTopologyLoss(nn.Module):
         self.cldice_weight = cldice_weight
         self.connectivity_weight = connectivity_weight
         self.variance_weight = variance_weight
+        self.entropy_weight = entropy_weight  # NEW: entropy regularization
         
         self.focal_alpha = focal_alpha
         self.focal_gamma = focal_gamma
@@ -249,9 +251,27 @@ class CombinedTopologyLoss(nn.Module):
         var_loss = torch.clamp(min_variance - variance, min=0.0) / min_variance
         
         return var_loss
-        union = pred.sum(dim=(2, 3, 4)) + target.sum(dim=(2, 3, 4))
-        dice = (2.0 * intersection + smooth) / (union + smooth)
-        return 1.0 - dice.mean()
+    
+    def entropy_regularization(self, pred):
+        """
+        Penalize predictions that are too confident (entropy too low)
+        Encourages the model to output less extreme values (not always 0 or 1)
+        This addresses the 99.88% foreground bias by pushing toward ~50% uncertainty
+        """
+        # Clamp to avoid log(0)
+        pred = torch.clamp(pred, 1e-7, 1 - 1e-7)
+        
+        # Shannon entropy: -p*log(p) - (1-p)*log(1-p)
+        # Maximum entropy = 0.693 at p=0.5
+        # Minimum entropy = 0 at p=0 or p=1
+        entropy = -(pred * torch.log(pred) + (1 - pred) * torch.log(1 - pred))
+        
+        # Target: encourage entropy > 0.3 (avoid overconfident predictions)
+        # Loss is high when entropy is low (overconfident)
+        target_entropy = 0.3
+        entropy_loss = torch.clamp(target_entropy - entropy.mean(), min=0.0)
+        
+        return entropy_loss
     
     def focal_loss(self, pred, target):
         """Focal loss for handling class imbalance with proper alpha weighting"""
@@ -299,6 +319,7 @@ class CombinedTopologyLoss(nn.Module):
         loss_cldice = self.cldice_loss(pred, target)
         loss_connectivity = self.connectivity_loss(pred, target)
         loss_variance = self.variance_regularization(pred)
+        loss_entropy = self.entropy_regularization(pred)  # NEW: entropy regularization
         
         # Combine losses
         total_loss = (
@@ -307,7 +328,8 @@ class CombinedTopologyLoss(nn.Module):
             self.boundary_weight * loss_boundary +
             self.cldice_weight * loss_cldice +
             self.connectivity_weight * loss_connectivity +
-            self.variance_weight * loss_variance
+            self.variance_weight * loss_variance +
+            self.entropy_weight * loss_entropy  # NEW
         )
         
         # Return total loss and components for logging
@@ -318,6 +340,7 @@ class CombinedTopologyLoss(nn.Module):
             'cldice': loss_cldice.item(),
             'connectivity': loss_connectivity.item(),
             'variance': loss_variance.item(),
+            'entropy': loss_entropy.item(),  # NEW
             'total': total_loss.item()
         }
 

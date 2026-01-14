@@ -107,3 +107,6 @@ cache/
 output/
 results/
 predictions/
+predictions_*/
+train_images_sample/
+train_labels_sample/
