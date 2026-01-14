@@ -322,7 +322,7 @@ class TopologyAwareTrainer:
             self.logger.info(
                 f"Epoch {epoch} Train - Loss: {train_losses['total']:.4f} "
                 f"(dice: {train_losses['dice']:.4f}, focal: {train_losses['focal']:.4f}, "
-                f"variance: {train_losses['variance']:.4f})"
+                f"variance: {train_losses['variance']:.4f}, entropy: {train_losses.get('entropy', 0.0):.4f})"
             )
             
             # Validate
@@ -330,7 +330,7 @@ class TopologyAwareTrainer:
             self.logger.info(
                 f"Epoch {epoch} Val - Loss: {val_losses['total']:.4f} "
                 f"(dice: {val_losses['dice']:.4f}, focal: {val_losses['focal']:.4f}, "
-                f"variance: {val_losses['variance']:.4f})"
+                f"variance: {val_losses['variance']:.4f}, entropy: {val_losses.get('entropy', 0.0):.4f})"
             )
             
             # Set baseline loss on first epoch for substantial progress detection

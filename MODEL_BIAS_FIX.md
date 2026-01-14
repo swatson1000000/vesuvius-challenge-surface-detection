@@ -10,7 +10,10 @@
 **Root Cause:**
 The model learned a strong bias toward positive (foreground) predictions, likely due to:
 1. Insufficient regularization against overconfident predictions
-2. Dice loss (0.4 weight) encouraging high overlap without penalizing overconfidence
+2. Dice loss (0.4 weig
+
+
+ht) encouraging high overlap without penalizing overconfidence
 3. Weak focal loss (0.2 weight) not focusing enough on hard negatives (background)
 4. Missing entropy regularization to discourage extreme predictions
 
