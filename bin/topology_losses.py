@@ -195,12 +195,12 @@ class CombinedTopologyLoss(nn.Module):
     """
     
     def __init__(self, 
-                 dice_weight=0.4,
-                 focal_weight=0.2,
-                 boundary_weight=0.2,
-                 cldice_weight=0.1,
-                 connectivity_weight=0.1,
-                 variance_weight=0.1,
+                 dice_weight=0.3,
+                 focal_weight=0.15,
+                 boundary_weight=0.15,
+                 cldice_weight=0.05,
+                 connectivity_weight=0.05,
+                 variance_weight=0.25,
                  entropy_weight=0.05,
                  focal_alpha=0.25,
                  focal_gamma=2.0,
@@ -240,17 +240,29 @@ class CombinedTopologyLoss(nn.Module):
         """
         Penalize low variance predictions to prevent uniform outputs
         Encourages model to make discriminative predictions
+        
+        Uses negative entropy: punishes predictions that are too extreme (all 0s or all 1s)
         """
-        # Compute variance of predictions across spatial dimensions
+        # Clamp to avoid log(0)
+        pred_safe = torch.clamp(pred, 1e-7, 1 - 1e-7)
+        
+        # Compute variance across spatial dimensions
         variance = pred.var(dim=(2, 3, 4)).mean()
         
-        # Target variance for binary predictions is around 0.25 (for 50/50 split)
-        # Penalize if variance is too low (uniform predictions)
-        # Loss is high when variance is low
-        min_variance = 0.01  # Minimum acceptable variance
-        var_loss = torch.clamp(min_variance - variance, min=0.0) / min_variance
+        # AGGRESSIVE variance penalty: exponential penalty as variance approaches 0
+        # Loss = (1 - variance)^2 so it grows rapidly as variance decreases
+        var_loss = (1.0 - variance) ** 2.0
         
-        return var_loss
+        # Additional entropy penalty to prevent extreme predictions
+        # Shannon entropy: -p*log(p) - (1-p)*log(1-p)
+        entropy = -(pred_safe * torch.log(pred_safe) + (1 - pred_safe) * torch.log(1 - pred_safe))
+        entropy_mean = entropy.mean()
+        
+        # Penalize low entropy (too confident): target entropy > 0.5 for better diversity
+        entropy_penalty = torch.clamp(0.5 - entropy_mean, min=0.0)
+        
+        # Combined: strong penalty for lack of variance + entropy penalty
+        return var_loss + entropy_penalty
     
     def entropy_regularization(self, pred):
         """
