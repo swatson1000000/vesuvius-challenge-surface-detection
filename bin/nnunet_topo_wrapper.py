@@ -155,7 +155,8 @@ class TopologyAwareTrainer:
             'boundary': [],
             'cldice': [],
             'connectivity': [],
-            'variance': []
+            'variance': [],
+            'entropy': []
         }
         
         for batch_idx, batch in enumerate(train_loader):
@@ -207,7 +208,8 @@ class TopologyAwareTrainer:
             'boundary': [],
             'cldice': [],
             'connectivity': [],
-            'variance': []
+            'variance': [],
+            'entropy': []
         }
         
         all_predictions = []
