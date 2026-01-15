@@ -67,6 +67,15 @@ noise_target_layers: ['decoders', 'output']  # Only add noise to these layers
 # Early stopping
 early_stopping_patience: 50
 
+# Catastrophic Degradation Detection & Recovery
+# Automatically rolls back to best model if loss degrades by this fraction
+# Example: threshold=0.15 means rollback if loss > 1.15x best loss
+catastrophic_degradation_threshold: 0.15  # 15% increase triggers rollback
+# Options:
+#   0.10 (10%)  - Very aggressive, catches early degradation
+#   0.15 (15%)  - Balanced (recommended - default)
+#   0.25 (25%)  - Conservative, only catches major degradation
+
 # Post-processing (for validation)
 postprocess:
   threshold: 0.5

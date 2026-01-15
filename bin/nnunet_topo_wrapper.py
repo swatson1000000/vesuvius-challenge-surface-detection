@@ -256,6 +256,7 @@ class TopologyAwareTrainer:
               plateau_patience: int = 3,
               plateau_threshold: float = 0.002,
               substantial_progress_threshold: float = 0.5,
+              catastrophic_degradation_threshold: float = 0.15,
               swa_model=None,
               swa_scheduler=None,
               swa_start_epoch: int = 50,
@@ -266,7 +267,7 @@ class TopologyAwareTrainer:
               noise_decay: float = 0.9,
               noise_target_layers: list = None):
         """
-        Full training loop with adaptive plateau detection, SWA, and weight noise
+        Full training loop with adaptive plateau detection, SWA, weight noise, and catastrophic degradation recovery
         
         Args:
             train_loader: Training data loader
@@ -278,6 +279,7 @@ class TopologyAwareTrainer:
             plateau_patience: Epochs to wait before declaring plateau
             plateau_threshold: Minimum improvement to avoid plateau detection
             substantial_progress_threshold: Fraction of improvement from baseline to disable interventions (default 0.5 = 50%)
+            catastrophic_degradation_threshold: Fraction increase in loss to trigger rollback (default 0.15 = 15%)
             swa_model: Stochastic Weight Averaging model (optional)
             swa_scheduler: SWA learning rate scheduler (optional)
             swa_start_epoch: Epoch to start SWA
@@ -294,9 +296,22 @@ class TopologyAwareTrainer:
         patience_counter = 0
         plateau_counter = 0
         last_best_loss = float('inf')
+        best_loss_ever = float('inf')  # Track absolute best loss across all epochs
         baseline_loss = None  # Track starting loss for substantial progress detection
         intervention_count = 0
         max_interventions = 3
+        
+        # Store best hyperparameters for potential rollback
+        best_lr = self.base_lr
+        best_loss_weights = None
+        if hasattr(self.criterion, 'dice_weight'):
+            best_loss_weights = {
+                'dice_weight': self.criterion.dice_weight,
+                'focal_weight': self.criterion.focal_weight,
+                'boundary_weight': getattr(self.criterion, 'boundary_weight', 0.0),
+                'cldice_weight': getattr(self.criterion, 'cldice_weight', 0.0),
+                'connectivity_weight': getattr(self.criterion, 'connectivity_weight', 0.0),
+            }
         
         for epoch in range(num_epochs):
             self.current_epoch = epoch
@@ -371,10 +386,59 @@ class TopologyAwareTrainer:
             if val_score > self.best_val_score:
                 self.best_val_score = val_score
                 self.save_checkpoint('best_model.pth')
+                # Update best loss tracking
+                best_loss_ever = current_val_loss
+                best_lr = self.base_lr
+                if hasattr(self.criterion, 'dice_weight'):
+                    best_loss_weights = {
+                        'dice_weight': self.criterion.dice_weight,
+                        'focal_weight': self.criterion.focal_weight,
+                        'boundary_weight': getattr(self.criterion, 'boundary_weight', 0.0),
+                        'cldice_weight': getattr(self.criterion, 'cldice_weight', 0.0),
+                        'connectivity_weight': getattr(self.criterion, 'connectivity_weight', 0.0),
+                    }
                 self.logger.info(f"New best model saved! Score: {val_score:.4f}")
                 patience_counter = 0
             else:
                 patience_counter += 1
+            
+            # ⚠️ CATASTROPHIC DEGRADATION DETECTION
+            # If loss increased by more than threshold from best, rollback
+            if best_loss_ever != float('inf'):
+                degradation_fraction = (current_val_loss - best_loss_ever) / best_loss_ever
+                if degradation_fraction > catastrophic_degradation_threshold:
+                    self.logger.error(f"🚨 CATASTROPHIC DEGRADATION DETECTED!")
+                    self.logger.error(f"   Best loss: {best_loss_ever:.4f}")
+                    self.logger.error(f"   Current loss: {current_val_loss:.4f}")
+                    self.logger.error(f"   Degradation: {degradation_fraction*100:.1f}% (threshold: {catastrophic_degradation_threshold*100:.1f}%)")
+                    self.logger.error(f"   Rolling back to best checkpoint and restoring hyperparameters...")
+                    
+                    # Rollback model
+                    self.load_checkpoint('best_model.pth')
+                    
+                    # Restore best learning rate
+                    for param_group in self.optimizer.param_groups:
+                        param_group['lr'] = best_lr
+                    self.base_lr = best_lr
+                    self.logger.info(f"   ✓ Restored LR: {best_lr:.6f}")
+                    
+                    # Restore best loss weights
+                    if best_loss_weights is not None and hasattr(self.criterion, 'dice_weight'):
+                        self.criterion.dice_weight = best_loss_weights['dice_weight']
+                        self.criterion.focal_weight = best_loss_weights['focal_weight']
+                        if hasattr(self.criterion, 'boundary_weight'):
+                            self.criterion.boundary_weight = best_loss_weights['boundary_weight']
+                        if hasattr(self.criterion, 'cldice_weight'):
+                            self.criterion.cldice_weight = best_loss_weights['cldice_weight']
+                        if hasattr(self.criterion, 'connectivity_weight'):
+                            self.criterion.connectivity_weight = best_loss_weights['connectivity_weight']
+                        self.logger.info(f"   ✓ Restored loss weights (Dice={best_loss_weights['dice_weight']:.2f}, "
+                                       f"Focal={best_loss_weights['focal_weight']:.2f})")
+                    
+                    # Reset intervention counter - start fresh from good state
+                    intervention_count = 0
+                    self.logger.info(f"   ✓ Reset intervention counter")
+                    self.logger.info(f"   ✓ Continuing training from best state...")
             
             # Plateau detection
             improvement = last_best_loss - current_val_loss

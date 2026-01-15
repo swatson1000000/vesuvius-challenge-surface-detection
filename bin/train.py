@@ -326,7 +326,8 @@ def train_single_fold(fold: int, config: dict, data_dir: Path, device: torch.dev
         'noise_frequency': config.get('noise_frequency', 10),
         'noise_std': config.get('noise_std', 0.001),
         'noise_decay': config.get('noise_decay', 0.9),
-        'noise_target_layers': config.get('noise_target_layers', ['decoders', 'output'])
+        'noise_target_layers': config.get('noise_target_layers', ['decoders', 'output']),
+        'catastrophic_degradation_threshold': config.get('catastrophic_degradation_threshold', 0.15)
     }
     
     trainer.train(
