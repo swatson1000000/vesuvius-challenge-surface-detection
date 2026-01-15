@@ -301,6 +301,10 @@ class TopologyAwareTrainer:
         intervention_count = 0
         max_interventions = 3
         
+        # Track consecutive epochs of degradation (validation loss worse than best)
+        consecutive_degradation_epochs = 0
+        degradation_epoch_threshold = 5  # Recovery trigger: 5 consecutive epochs of degradation
+        
         # Store best hyperparameters for potential rollback
         best_lr = self.base_lr
         best_loss_weights = None
@@ -439,6 +443,54 @@ class TopologyAwareTrainer:
                     intervention_count = 0
                     self.logger.info(f"   ✓ Reset intervention counter")
                     self.logger.info(f"   ✓ Continuing training from best state...")
+            
+            # ⚠️ 5-EPOCH DEGRADATION DETECTOR
+            # If validation loss is worse than best for 5 consecutive epochs, jump back to best checkpoint
+            if current_val_loss > best_loss_ever:
+                consecutive_degradation_epochs += 1
+                self.logger.warning(f"⚠️  Epoch {epoch}: Val Loss WORSE than best ({current_val_loss:.4f} > {best_loss_ever:.4f})")
+                self.logger.warning(f"   Consecutive degradation epochs: {consecutive_degradation_epochs}/{degradation_epoch_threshold}")
+                
+                if consecutive_degradation_epochs >= degradation_epoch_threshold:
+                    self.logger.warning(f"🚨 SUSTAINED DEGRADATION for {degradation_epoch_threshold} epochs!")
+                    self.logger.warning(f"   Best Val Loss: {best_loss_ever:.4f}")
+                    self.logger.warning(f"   Current Val Loss: {current_val_loss:.4f}")
+                    self.logger.warning(f"   Jumping back to best checkpoint...")
+                    
+                    # Rollback model
+                    self.load_checkpoint('best_model.pth')
+                    self.logger.info(f"   ✓ Loaded best model checkpoint")
+                    
+                    # Restore best learning rate
+                    for param_group in self.optimizer.param_groups:
+                        param_group['lr'] = best_lr
+                    self.base_lr = best_lr
+                    self.logger.info(f"   ✓ Restored LR: {best_lr:.6f}")
+                    
+                    # Restore best loss weights
+                    if best_loss_weights is not None and hasattr(self.criterion, 'dice_weight'):
+                        self.criterion.dice_weight = best_loss_weights['dice_weight']
+                        self.criterion.focal_weight = best_loss_weights['focal_weight']
+                        if hasattr(self.criterion, 'boundary_weight'):
+                            self.criterion.boundary_weight = best_loss_weights['boundary_weight']
+                        if hasattr(self.criterion, 'cldice_weight'):
+                            self.criterion.cldice_weight = best_loss_weights['cldice_weight']
+                        if hasattr(self.criterion, 'connectivity_weight'):
+                            self.criterion.connectivity_weight = best_loss_weights['connectivity_weight']
+                        self.logger.info(f"   ✓ Restored loss weights (Dice={best_loss_weights['dice_weight']:.2f}, "
+                                       f"Focal={best_loss_weights['focal_weight']:.2f})")
+                    
+                    # Reset counters
+                    consecutive_degradation_epochs = 0
+                    intervention_count = 0
+                    plateau_counter = 0
+                    self.logger.info(f"   ✓ Reset all counters")
+                    self.logger.info(f"   ✓ Resuming training from best state...")
+            else:
+                # Reset counter if we see improvement
+                if consecutive_degradation_epochs > 0:
+                    self.logger.info(f"✓ Validation loss improved! Resetting degradation counter.")
+                consecutive_degradation_epochs = 0
             
             # Plateau detection
             improvement = last_best_loss - current_val_loss
