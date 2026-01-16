@@ -136,7 +136,7 @@ class TopologyAwareTrainer:
         
         # Training state
         self.current_epoch = 0
-        self.best_val_score = 0.0
+        self.best_val_score = float('inf')  # Will be set to loss values (lower is better)
         self.warmup_epochs = warmup_epochs
         self.base_lr = optimizer.param_groups[0]['lr']
         
@@ -383,17 +383,20 @@ class TopologyAwareTrainer:
                     scheduler.step()
             
             # Save best model
-            val_score = -val_losses['total']  # Lower loss = better
+            # Use actual loss value (lower is better) - DO NOT negate!
+            val_score = val_losses['total']  # Lower loss = better
             if 'competition_score' in val_losses:
                 val_score = val_losses['competition_score']
             
             self.logger.debug(f"Best model check: val_score={val_score:.4f}, best_val_score={self.best_val_score:.4f}")
             
-            if val_score > self.best_val_score:
+            # Only save if current loss is actually better (LOWER) than best achieved
+            if val_score < self.best_val_score:  # Lower loss is better
+                prev_score = self.best_val_score
                 self.best_val_score = val_score
-                self.logger.info(f"New best score: {val_score:.4f} (previous: {self.best_val_score:.4f})")
+                self.logger.info(f"✅ New best score: {val_score:.4f} (previous: {prev_score:.4f})")
                 self.save_checkpoint('best_model.pth')
-                # Update best loss tracking
+                # Update best loss tracking - this model is genuinely the best
                 best_loss_ever = current_val_loss
                 best_lr = self.base_lr
                 if hasattr(self.criterion, 'dice_weight'):
