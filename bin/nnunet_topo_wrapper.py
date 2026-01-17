@@ -603,8 +603,8 @@ class TopologyAwareTrainer:
         
         elif intervention_num == 1:
             # Second intervention: Stochastic loss weight combination (explore loss landscape)
-            new_lr = self.base_lr * (lr_scale * 0.7)  # Slightly less aggressive than first
-            self.logger.warning(f"→ Adaptive LR increase: {self.base_lr:.6f} → {new_lr:.6f}")
+            new_lr = self.base_lr * lr_scale  # Maintain full aggression (not reduced)
+            self.logger.warning(f"→ Aggressive LR increase: {self.base_lr:.6f} → {new_lr:.6f}")
             
             # Stochastic loss combinations to explore different regions
             loss_mixes = [
@@ -632,12 +632,12 @@ class TopologyAwareTrainer:
                 self.criterion.connectivity_weight = 0.0
         
         elif intervention_num == 2:
-            # Third intervention: Aggressive optimizer reset with conservative loss focus
-            new_lr = self.base_lr * lr_scale * 0.5  # Further reduced to avoid instability
-            self.logger.warning(f"→ Conservative optimizer reset: {self.base_lr:.6f} → {new_lr:.6f}")
-            self.logger.warning(f"→ Using balanced Dice+Focal mix (not just Dice)")
+            # Third intervention: Aggressive exploration with stochastic loss from full palette
+            new_lr = self.base_lr * lr_scale * 0.8  # High but slightly controlled
+            self.logger.warning(f"→ Aggressive final intervention: {self.base_lr:.6f} → {new_lr:.6f}")
+            self.logger.warning(f"→ Using aggressive stochastic loss exploration with full palette")
             
-            # Reset optimizer with more conservative LR
+            # Reset optimizer with aggressive LR
             self.optimizer = torch.optim.AdamW(
                 self.model.parameters(),
                 lr=new_lr,
@@ -645,15 +645,27 @@ class TopologyAwareTrainer:
             )
             self.base_lr = new_lr
             
-            # Balanced loss mix instead of dice-only (less aggressive)
+            # More aggressive stochastic loss combinations (includes boundary and cldice)
+            loss_mixes_aggressive = [
+                {'dice': 0.8, 'focal': 0.2, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
+                {'dice': 0.3, 'focal': 0.7, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
+                {'dice': 0.5, 'focal': 0.3, 'variance': 0.2, 'boundary': 0.0, 'cldice': 0.0},
+                {'dice': 0.4, 'focal': 0.3, 'variance': 0.1, 'boundary': 0.1, 'cldice': 0.1},
+                {'dice': 0.6, 'focal': 0.2, 'variance': 0.1, 'boundary': 0.1, 'cldice': 0.0},
+            ]
+            selected_mix = random.choice(loss_mixes_aggressive)
+            self.logger.warning(f"→ Aggressive loss mix: Dice={selected_mix['dice']:.2f}, "
+                               f"Focal={selected_mix['focal']:.2f}, Variance={selected_mix['variance']:.2f}, "
+                               f"Boundary={selected_mix['boundary']:.2f}, clDice={selected_mix['cldice']:.2f}")
+            
+            # Apply aggressive stochastic loss weights
             if hasattr(self.criterion, 'dice_weight'):
-                self.criterion.dice_weight = 0.6
-                self.criterion.focal_weight = 0.4
-                self.criterion.variance_weight = 0.0
-                self.criterion.boundary_weight = 0.0
-                self.criterion.cldice_weight = 0.0
+                self.criterion.dice_weight = selected_mix['dice']
+                self.criterion.focal_weight = selected_mix['focal']
+                self.criterion.variance_weight = selected_mix['variance']
+                self.criterion.boundary_weight = selected_mix['boundary']
+                self.criterion.cldice_weight = selected_mix['cldice']
                 self.criterion.connectivity_weight = 0.0
-                self.logger.warning(f"→ Conservative loss weights: Dice=0.6, Focal=0.4")
         
         self.logger.warning(f"✓ Adaptive intervention complete. Continuing training...")
     
