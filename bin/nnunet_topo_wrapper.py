@@ -459,7 +459,9 @@ class TopologyAwareTrainer:
                     intervention_count = 0
                     plateau_counter = 0
                     consecutive_degradation_epochs = 0
+                    patience_counter = 0  # Reset early stopping counter after recovery
                     self.logger.info(f"   ✓ Reset intervention counter")
+                    self.logger.info(f"   ✓ Reset patience counter (early stopping)")
                     self.logger.info(f"   ✓ Continuing training from best state...")
             else:
                 self.logger.debug(f"Skipping degradation check (best_loss_ever not yet initialized)")
@@ -505,6 +507,7 @@ class TopologyAwareTrainer:
                         consecutive_degradation_epochs = 0
                         intervention_count = 0
                         plateau_counter = 0
+                        patience_counter = 0  # Reset early stopping counter after recovery
                         self.logger.info(f"   ✓ Reset all counters")
                         self.logger.info(f"   ✓ Resuming training from best state...")
                 else:
