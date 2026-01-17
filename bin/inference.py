@@ -374,8 +374,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run inference with topology post-processing")
     
     # Model arguments
-    parser.add_argument('--checkpoint', type=str, required=True,
-                       help='Path to model checkpoint')
+    parser.add_argument('--checkpoint', type=str, default='checkpoints/fold_0/best_model.pth',
+                       help='Path to model checkpoint (default: best_model.pth for fold_0)')
     parser.add_argument('--device', type=str, default='cuda',
                        help='Device to use (cuda or cpu)')
     
