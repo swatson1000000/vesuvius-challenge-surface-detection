@@ -62,7 +62,7 @@ class InferencePipeline:
         
     def _load_model(self, model_path: str) -> torch.nn.Module:
         """Load trained model"""
-        checkpoint = torch.load(model_path, map_location=self.device)
+        checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         
         # Create model (should match training configuration)
         model = TopologyAwareUNet3D(

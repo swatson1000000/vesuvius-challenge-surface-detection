@@ -158,6 +158,7 @@ class TopologyAwareTrainer:
             'variance': [],
             'entropy': []
         }
+        epoch_grad_norms = []  # Track gradient norms for adaptive interventions
         
         for batch_idx, batch in enumerate(train_loader):
             images = batch['image'].to(self.device)
@@ -175,6 +176,7 @@ class TopologyAwareTrainer:
             
             # Gradient clipping (more aggressive for stability)
             grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=2.0)
+            epoch_grad_norms.append(grad_norm)  # Track for adaptive interventions
             
             self.optimizer.step()
             
@@ -194,6 +196,10 @@ class TopologyAwareTrainer:
         
         # Average losses
         avg_losses = {k: np.mean(v) for k, v in epoch_losses.items()}
+        
+        # Add average gradient norm for adaptive interventions
+        avg_grad_norm = np.mean(epoch_grad_norms) if epoch_grad_norms else 0.1
+        avg_losses['avg_gradient_norm'] = avg_grad_norm
         
         return avg_losses
     
@@ -524,7 +530,9 @@ class TopologyAwareTrainer:
                 else:
                     self.logger.warning(f"⚠️  PLATEAU DETECTED after {plateau_counter} epochs with no improvement!")
                     self.logger.warning(f"   Current improvement from baseline: {improvement_fraction*100:.1f}% (threshold: {substantial_progress_threshold*100:.0f}%)")
-                    self._handle_plateau(epoch, intervention_count)
+                    # Pass gradient norm for adaptive LR scaling
+                    avg_grad_norm = train_losses.get('avg_gradient_norm', 0.1)
+                    self._handle_plateau(epoch, intervention_count, avg_grad_norm)
                     intervention_count += 1
                     plateau_counter = 0  # Reset counter after intervention
             
@@ -539,61 +547,94 @@ class TopologyAwareTrainer:
         
         self.logger.info(f"Training complete! Best score: {self.best_val_score:.4f}")
     
-    def _handle_plateau(self, epoch: int, intervention_num: int):
+    def _handle_plateau(self, epoch: int, intervention_num: int, avg_gradient_norm: float = None):
         """
-        Handle training plateau with adaptive intervention strategies
+        Handle training plateau with adaptive intervention strategies based on gradient statistics
+        and stochastic loss weight combinations
         
-        Intervention sequence:
-        1. Increase LR + disable complex topology losses
-        2. Further increase LR + simplify to focal only
-        3. Reset optimizer + use dice only
+        Adaptive intervention sequence:
+        1. Moderate LR adjustment + balanced loss mix (adaptive to gradient behavior)
+        2. Higher LR with focal-dominant mix (explore different loss landscape)
+        3. Aggressive optimizer reset + dice-focused mix (last resort escape)
         """
-        self.logger.warning(f"🔧 Applying intervention #{intervention_num + 1}")
+        import random
+        
+        self.logger.warning(f"🔧 Applying adaptive intervention #{intervention_num + 1}")
+        
+        # Determine adaptive LR scaling based on gradient norms
+        if avg_gradient_norm is not None:
+            if avg_gradient_norm < 0.01:
+                lr_scale = 15.0  # Very small gradients - need aggressive boost
+                self.logger.warning(f"→ Very small gradient norm ({avg_gradient_norm:.4f}) - aggressive LR scaling")
+            elif avg_gradient_norm < 0.1:
+                lr_scale = 10.0  # Small gradients - moderate boost
+                self.logger.warning(f"→ Small gradient norm ({avg_gradient_norm:.4f}) - moderate LR scaling")
+            elif avg_gradient_norm > 0.5:
+                lr_scale = 3.0   # Large gradients - conservative boost
+                self.logger.warning(f"→ Large gradient norm ({avg_gradient_norm:.4f}) - conservative LR scaling")
+            else:
+                lr_scale = 5.0   # Normal gradients - standard boost
+                self.logger.warning(f"→ Normal gradient norm ({avg_gradient_norm:.4f}) - standard LR scaling")
+        else:
+            # Fallback: use fixed scaling based on intervention number
+            lr_scales = [8.0, 4.0, 2.0]
+            lr_scale = lr_scales[min(intervention_num, 2)]
         
         if intervention_num == 0:
-            # First intervention: Increase LR 10x, disable boundary/cldice/connectivity
-            new_lr = self.base_lr * 10
-            self.logger.warning(f"→ Increasing LR: {self.base_lr:.6f} → {new_lr:.6f}")
-            self.logger.warning(f"→ Disabling complex topology losses (boundary, clDice, connectivity)")
+            # First intervention: Moderate LR increase + disable only connectivity loss
+            new_lr = self.base_lr * lr_scale
+            self.logger.warning(f"→ Adaptive LR adjustment: {self.base_lr:.6f} → {new_lr:.6f} (scale: {lr_scale}x)")
+            self.logger.warning(f"→ Disabling only connectivity loss, keeping topology losses")
             
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = new_lr
             self.base_lr = new_lr
             
-            # Disable complex losses
-            if hasattr(self.criterion, 'boundary_weight'):
-                self.criterion.boundary_weight = 0.0
-                self.criterion.cldice_weight = 0.0
-                self.criterion.connectivity_weight = 0.0
-                self.logger.warning(f"→ Loss weights: Dice={self.criterion.dice_weight:.2f}, "
-                                   f"Focal={self.criterion.focal_weight:.2f}")
+            # Adaptive loss weights: keep diversity but reduce connectivity
+            if hasattr(self.criterion, 'connectivity_weight'):
+                self.criterion.connectivity_weight = 0.0  # Only remove connectivity
+                self.logger.warning(f"→ Loss weights - Dice={self.criterion.dice_weight:.2f}, "
+                                   f"Focal={self.criterion.focal_weight:.2f}, "
+                                   f"Variance={getattr(self.criterion, 'variance_weight', 0):.2f}, "
+                                   f"Boundary={getattr(self.criterion, 'boundary_weight', 0):.2f}")
         
         elif intervention_num == 1:
-            # Second intervention: Further increase LR 5x, use focal loss only
-            new_lr = self.base_lr * 5
-            self.logger.warning(f"→ Further increasing LR: {self.base_lr:.6f} → {new_lr:.6f}")
-            self.logger.warning(f"→ Switching to FOCAL LOSS ONLY")
+            # Second intervention: Stochastic loss weight combination (explore loss landscape)
+            new_lr = self.base_lr * (lr_scale * 0.7)  # Slightly less aggressive than first
+            self.logger.warning(f"→ Adaptive LR increase: {self.base_lr:.6f} → {new_lr:.6f}")
+            
+            # Stochastic loss combinations to explore different regions
+            loss_mixes = [
+                {'dice': 0.6, 'focal': 0.4, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
+                {'dice': 0.5, 'focal': 0.5, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
+                {'dice': 0.4, 'focal': 0.6, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
+                {'dice': 0.7, 'focal': 0.3, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
+                {'dice': 0.5, 'focal': 0.3, 'variance': 0.2, 'boundary': 0.0, 'cldice': 0.0},
+            ]
+            selected_mix = random.choice(loss_mixes)
+            self.logger.warning(f"→ Stochastic loss mix: Dice={selected_mix['dice']}, "
+                               f"Focal={selected_mix['focal']}, Variance={selected_mix['variance']}")
             
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = new_lr
             self.base_lr = new_lr
             
-            # Focal loss only
+            # Apply stochastic loss weights
             if hasattr(self.criterion, 'dice_weight'):
-                self.criterion.dice_weight = 0.0
-                self.criterion.focal_weight = 1.0
-                self.criterion.boundary_weight = 0.0
-                self.criterion.cldice_weight = 0.0
+                self.criterion.dice_weight = selected_mix['dice']
+                self.criterion.focal_weight = selected_mix['focal']
+                self.criterion.variance_weight = selected_mix['variance']
+                self.criterion.boundary_weight = selected_mix['boundary']
+                self.criterion.cldice_weight = selected_mix['cldice']
                 self.criterion.connectivity_weight = 0.0
-                self.logger.warning(f"→ Loss weights: Focal=1.0, all others=0.0")
         
         elif intervention_num == 2:
-            # Third intervention: Reset optimizer with 3x LR boost, use dice loss only
-            new_lr = self.base_lr * 3
-            self.logger.warning(f"→ Resetting optimizer state with LR boost: {self.base_lr:.6f} → {new_lr:.6f}")
-            self.logger.warning(f"→ Switching to DICE LOSS ONLY")
+            # Third intervention: Aggressive optimizer reset with conservative loss focus
+            new_lr = self.base_lr * lr_scale * 0.5  # Further reduced to avoid instability
+            self.logger.warning(f"→ Conservative optimizer reset: {self.base_lr:.6f} → {new_lr:.6f}")
+            self.logger.warning(f"→ Using balanced Dice+Focal mix (not just Dice)")
             
-            # Reset optimizer with boosted LR
+            # Reset optimizer with more conservative LR
             self.optimizer = torch.optim.AdamW(
                 self.model.parameters(),
                 lr=new_lr,
@@ -601,16 +642,17 @@ class TopologyAwareTrainer:
             )
             self.base_lr = new_lr
             
-            # Dice loss only
+            # Balanced loss mix instead of dice-only (less aggressive)
             if hasattr(self.criterion, 'dice_weight'):
-                self.criterion.dice_weight = 1.0
-                self.criterion.focal_weight = 0.0
+                self.criterion.dice_weight = 0.6
+                self.criterion.focal_weight = 0.4
+                self.criterion.variance_weight = 0.0
                 self.criterion.boundary_weight = 0.0
                 self.criterion.cldice_weight = 0.0
                 self.criterion.connectivity_weight = 0.0
-                self.logger.warning(f"→ Loss weights: Dice=1.0, all others=0.0")
+                self.logger.warning(f"→ Conservative loss weights: Dice=0.6, Focal=0.4")
         
-        self.logger.warning(f"✓ Intervention complete. Continuing training...")
+        self.logger.warning(f"✓ Adaptive intervention complete. Continuing training...")
     
     def add_weight_noise(self, noise_std=0.001, target_layers=['decoders', 'output']):
         """
@@ -653,7 +695,7 @@ class TopologyAwareTrainer:
     def load_checkpoint(self, filename: str):
         """Load model checkpoint"""
         checkpoint_path = self.checkpoint_dir / filename
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
         
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
