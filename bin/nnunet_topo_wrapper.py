@@ -176,7 +176,8 @@ class TopologyAwareTrainer:
             
             # Gradient clipping (more aggressive for stability)
             grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=2.0)
-            epoch_grad_norms.append(grad_norm)  # Track for adaptive interventions
+            # Convert to Python float for tracking
+            epoch_grad_norms.append(grad_norm.item() if torch.is_tensor(grad_norm) else grad_norm)
             
             self.optimizer.step()
             
