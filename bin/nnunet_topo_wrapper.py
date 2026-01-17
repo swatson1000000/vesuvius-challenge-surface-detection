@@ -539,10 +539,6 @@ class TopologyAwareTrainer:
                     intervention_count += 1
                     plateau_counter = 0  # Reset counter after intervention
             
-            # Regular checkpoint
-            if epoch % 10 == 0:
-                self.save_checkpoint(f'checkpoint_epoch_{epoch}.pth')
-            
             # Early stopping
             if patience_counter >= early_stopping_patience:
                 self.logger.info(f"Early stopping triggered after {epoch} epochs")
