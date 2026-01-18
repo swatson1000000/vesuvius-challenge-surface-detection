@@ -260,9 +260,9 @@ class TopologyAwareTrainer:
               scheduler=None,
               metric_fn=None,
               early_stopping_patience: int = 50,
-              plateau_patience: int = 3,
+              plateau_patience: int = 2,
               plateau_threshold: float = 0.002,
-              substantial_progress_threshold: float = 0.5,
+              substantial_progress_threshold: float = 0.3,
               catastrophic_degradation_threshold: float = 0.15,
               swa_model=None,
               swa_scheduler=None,
@@ -564,20 +564,20 @@ class TopologyAwareTrainer:
         # Determine adaptive LR scaling based on gradient norms
         if avg_gradient_norm is not None:
             if avg_gradient_norm < 0.01:
-                lr_scale = 15.0  # Very small gradients - need aggressive boost
-                self.logger.warning(f"→ Very small gradient norm ({avg_gradient_norm:.4f}) - aggressive LR scaling")
+                lr_scale = 25.0  # Very small gradients - need very aggressive boost
+                self.logger.warning(f"→ Very small gradient norm ({avg_gradient_norm:.4f}) - very aggressive LR scaling")
             elif avg_gradient_norm < 0.1:
-                lr_scale = 10.0  # Small gradients - moderate boost
-                self.logger.warning(f"→ Small gradient norm ({avg_gradient_norm:.4f}) - moderate LR scaling")
+                lr_scale = 15.0  # Small gradients - aggressive boost
+                self.logger.warning(f"→ Small gradient norm ({avg_gradient_norm:.4f}) - aggressive LR scaling")
             elif avg_gradient_norm > 0.5:
-                lr_scale = 3.0   # Large gradients - conservative boost
-                self.logger.warning(f"→ Large gradient norm ({avg_gradient_norm:.4f}) - conservative LR scaling")
+                lr_scale = 5.0   # Large gradients - moderate boost
+                self.logger.warning(f"→ Large gradient norm ({avg_gradient_norm:.4f}) - moderate LR scaling")
             else:
-                lr_scale = 5.0   # Normal gradients - standard boost
-                self.logger.warning(f"→ Normal gradient norm ({avg_gradient_norm:.4f}) - standard LR scaling")
+                lr_scale = 8.0   # Normal gradients - strong boost
+                self.logger.warning(f"→ Normal gradient norm ({avg_gradient_norm:.4f}) - strong LR scaling")
         else:
             # Fallback: use fixed scaling based on intervention number
-            lr_scales = [8.0, 4.0, 2.0]
+            lr_scales = [12.0, 8.0, 5.0]
             lr_scale = lr_scales[min(intervention_num, 2)]
         
         if intervention_num == 0:
