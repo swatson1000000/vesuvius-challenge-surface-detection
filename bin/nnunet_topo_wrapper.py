@@ -302,6 +302,7 @@ class TopologyAwareTrainer:
         
         patience_counter = 0
         plateau_counter = 0
+        total_plateau_count = 0  # Track total plateaus across entire training (never resets)
         last_best_loss = float('inf')
         best_loss_ever = float('inf')  # Track absolute best loss across all epochs
         baseline_loss = None  # Track starting loss for substantial progress detection
@@ -534,9 +535,11 @@ class TopologyAwareTrainer:
                 else:
                     self.logger.warning(f"⚠️  PLATEAU DETECTED after {plateau_counter} epochs with no improvement!")
                     self.logger.warning(f"   Current improvement from baseline: {improvement_fraction*100:.1f}% (threshold: {substantial_progress_threshold*100:.0f}%)")
+                    total_plateau_count += 1  # Track total plateaus (never resets)
+                    self.logger.warning(f"   Total plateaus encountered: {total_plateau_count}")
                     # Pass gradient norm for adaptive LR scaling
                     avg_grad_norm = train_losses.get('avg_gradient_norm', 0.1)
-                    self._handle_plateau(epoch, intervention_count, avg_grad_norm)
+                    self._handle_plateau(epoch, intervention_count, avg_grad_norm, total_plateau_count)
                     intervention_count += 1
                     plateau_counter = 0  # Reset counter after intervention
             
@@ -547,19 +550,29 @@ class TopologyAwareTrainer:
         
         self.logger.info(f"Training complete! Best score: {self.best_val_score:.4f}")
     
-    def _handle_plateau(self, epoch: int, intervention_num: int, avg_gradient_norm: float = None):
+    def _handle_plateau(self, epoch: int, intervention_num: int, avg_gradient_norm: float = None, total_plateau_count: int = 1):
         """
         Handle training plateau with adaptive intervention strategies based on gradient statistics
-        and stochastic loss weight combinations
+        and stochastic loss weight combinations. Gets progressively more aggressive with each plateau.
         
         Adaptive intervention sequence:
         1. Moderate LR adjustment + balanced loss mix (adaptive to gradient behavior)
         2. Higher LR with focal-dominant mix (explore different loss landscape)
         3. Aggressive optimizer reset + dice-focused mix (last resort escape)
+        
+        Args:
+            epoch: Current epoch
+            intervention_num: Which intervention (0, 1, or 2) within this plateau cycle
+            avg_gradient_norm: Average gradient norm from training
+            total_plateau_count: Total number of plateaus seen (progressive aggressiveness multiplier)
         """
         import random
         
-        self.logger.warning(f"🔧 Applying adaptive intervention #{intervention_num + 1}")
+        # Progressive aggressiveness: each plateau we've seen makes interventions more aggressive
+        # plateau 1: multiplier = 1.0x, plateau 2: 1.3x, plateau 3: 1.6x, plateau 4: 1.9x, etc.
+        plateau_aggressiveness_multiplier = 1.0 + (total_plateau_count - 1) * 0.3
+        
+        self.logger.warning(f"🔧 Applying adaptive intervention #{intervention_num + 1} (plateau #{total_plateau_count}, aggressiveness: {plateau_aggressiveness_multiplier:.1f}x)")
         
         # Determine adaptive LR scaling based on gradient norms
         if avg_gradient_norm is not None:
@@ -579,6 +592,10 @@ class TopologyAwareTrainer:
             # Fallback: use fixed scaling based on intervention number
             lr_scales = [12.0, 8.0, 5.0]
             lr_scale = lr_scales[min(intervention_num, 2)]
+        
+        # Apply progressive aggressiveness multiplier based on total plateaus
+        lr_scale = lr_scale * plateau_aggressiveness_multiplier
+        self.logger.warning(f"→ Progressive aggressiveness multiplier: {plateau_aggressiveness_multiplier:.1f}x → Final LR scale: {lr_scale:.1f}x")
         
         if intervention_num == 0:
             # First intervention: Moderate LR increase + disable only connectivity loss
