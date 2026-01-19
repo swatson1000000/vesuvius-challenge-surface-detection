@@ -507,11 +507,18 @@ class TopologyAwareTrainer:
                         
                         # Reset counters
                         consecutive_degradation_epochs = 0
-                        intervention_count = 0
                         plateau_counter = 0
                         patience_counter = 0  # Reset early stopping counter after recovery
                         self.logger.info(f"   ✓ Reset all counters")
-                        self.logger.info(f"   ✓ Resuming training from best state...")
+                        
+                        # Apply adaptive intervention after restoration
+                        self.logger.warning(f"🔧 Applying adaptive intervention after sustained degradation recovery...")
+                        avg_grad_norm = train_losses.get('avg_gradient_norm', 0.1)
+                        total_plateau_count += 1
+                        self._handle_plateau(epoch, intervention_count, avg_grad_norm, total_plateau_count)
+                        intervention_count += 1
+                        consecutive_degradation_epochs = 0  # Reset degradation counter after intervention
+                        self.logger.info(f"   ✓ Resuming training from best state with adaptive intervention applied...")
                 else:
                     # Reset counter if we see improvement
                     if consecutive_degradation_epochs > 0:
