@@ -181,9 +181,9 @@ class TopologyAwareTrainer:
             
             self.optimizer.step()
             
-            # Log gradient norm periodically
-            if batch_idx % 50 == 0:
-                self.logger.info(f"Gradient norm: {grad_norm:.4f}")
+            # Log gradient norm periodically (reduce verbosity)
+            if batch_idx % 100 == 0 and batch_idx > 0:
+                self.logger.debug(f"Gradient norm: {grad_norm:.4f}")
             
             # Log losses
             for key, value in loss_components.items():
@@ -359,7 +359,7 @@ class TopologyAwareTrainer:
             self.logger.info(
                 f"Epoch {epoch} Val - Loss: {val_losses['total']:.4f} "
                 f"(dice: {val_losses['dice']:.4f}, focal: {val_losses['focal']:.4f}, "
-                f"variance: {val_losses['variance']:.4f}, entropy: {val_losses.get('entropy', 0.0):.4f})"
+                f"variance: {val_losses['variance']:.4f}, boundary: {val_losses.get('boundary', 0):.4f})"
             )
             
             # Set baseline loss on first epoch for substantial progress detection
@@ -403,7 +403,24 @@ class TopologyAwareTrainer:
                 prev_score = self.best_val_score
                 self.best_val_score = val_score
                 self.logger.info(f"✅ New best score: {val_score:.4f} (previous: {prev_score:.4f})")
-                self.save_checkpoint('best_model.pth')
+                
+                # Save training state with checkpoint
+                training_state = {
+                    'patience_counter': patience_counter,
+                    'plateau_counter': plateau_counter,
+                    'total_plateau_count': total_plateau_count,
+                    'consecutive_degradation_epochs': consecutive_degradation_epochs,
+                    'intervention_count': intervention_count,
+                    'baseline_loss': baseline_loss,
+                    'best_loss_ever': best_loss_ever
+                }
+                self.save_checkpoint('best_model.pth', training_state)
+                
+                # Log detailed validation metrics
+                self.logger.info(f"📊 Validation breakdown: Dice={val_losses.get('dice', 0):.4f}, "
+                               f"Focal={val_losses.get('focal', 0):.4f}, "
+                               f"Variance={val_losses.get('variance', 0):.4f}")
+                
                 # Update best loss tracking - this model is genuinely the best
                 best_loss_ever = current_val_loss
                 best_lr = self.base_lr
@@ -544,13 +561,19 @@ class TopologyAwareTrainer:
                     self.logger.warning(f"   Current improvement from baseline: {improvement_fraction*100:.1f}% (threshold: {substantial_progress_threshold*100:.0f}%)")
                     self.logger.warning(f"   Note: Adaptive intervention only applied after SUSTAINED DEGRADATION (5+ epochs)")
                     plateau_counter = 0  # Reset counter
-                    plateau_counter = 0  # Reset counter after intervention
-                    consecutive_degradation_epochs = 0  # Reset degradation counter after intervention
             
             # Early stopping
             if patience_counter >= early_stopping_patience:
                 self.logger.info(f"Early stopping triggered after {epoch} epochs")
                 break
+        
+        # Finalize SWA if enabled
+        if swa_model is not None:
+            self.logger.info(f"🔄 Finalizing SWA...")
+            swa_model.update_bn(train_loader, device=self.device)
+            # Load SWA model parameters
+            self.model = swa_model.module
+            self.logger.info(f"✓ SWA finalization complete")
         
         self.logger.info(f"Training complete! Best score: {self.best_val_score:.4f}")
     
@@ -704,14 +727,18 @@ class TopologyAwareTrainer:
                     noise_count += 1
         self.logger.info(f"   Added noise (std={noise_std:.6f}) to {noise_count} parameter tensors in {target_layers}")
     
-    def save_checkpoint(self, filename: str):
-        """Save model checkpoint"""
+    def save_checkpoint(self, filename: str, training_state: Dict = None):
+        """Save model checkpoint with optional training state"""
         checkpoint = {
             'epoch': self.current_epoch,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'best_val_score': self.best_val_score
         }
+        
+        # Include training state if provided
+        if training_state:
+            checkpoint['training_state'] = training_state
         
         checkpoint_path = self.checkpoint_dir / filename
         self.logger.info(f"Saving checkpoint to: {checkpoint_path.absolute()}")
