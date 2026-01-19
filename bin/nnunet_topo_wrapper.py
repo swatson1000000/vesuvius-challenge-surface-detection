@@ -311,7 +311,7 @@ class TopologyAwareTrainer:
         
         # Track consecutive epochs of degradation (validation loss worse than best)
         consecutive_degradation_epochs = 0
-        degradation_epoch_threshold = 5  # Recovery trigger: 5 consecutive epochs of degradation
+        degradation_epoch_threshold = 3  # Recovery trigger: 3 consecutive epochs of degradation
         
         # Store best hyperparameters for potential rollback
         best_lr = self.base_lr
