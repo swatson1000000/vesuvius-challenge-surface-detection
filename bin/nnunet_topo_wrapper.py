@@ -533,21 +533,17 @@ class TopologyAwareTrainer:
             else:
                 plateau_counter += 1
             
-            # Adaptive intervention when plateau detected
-            # BUT: Skip if substantial progress already achieved (model is learning well!)
+            # Plateau detection (informational only - no intervention)
+            # Adaptive intervention only applied after SUSTAINED DEGRADATION for 5 epochs
             if plateau_counter >= plateau_patience and intervention_count < max_interventions:
                 if has_substantial_progress:
-                    self.logger.info(f"ℹ️  Plateau detected but SKIPPING intervention (substantial progress: {improvement_fraction*100:.1f}%)")
+                    self.logger.info(f"ℹ️  Plateau detected but SKIPPING (substantial progress: {improvement_fraction*100:.1f}%)")
                     plateau_counter = 0  # Reset counter to avoid repeated logging
                 else:
                     self.logger.warning(f"⚠️  PLATEAU DETECTED after {plateau_counter} epochs with no improvement!")
                     self.logger.warning(f"   Current improvement from baseline: {improvement_fraction*100:.1f}% (threshold: {substantial_progress_threshold*100:.0f}%)")
-                    total_plateau_count += 1  # Track total plateaus (never resets)
-                    self.logger.warning(f"   Total plateaus encountered: {total_plateau_count}")
-                    # Pass gradient norm for adaptive LR scaling
-                    avg_grad_norm = train_losses.get('avg_gradient_norm', 0.1)
-                    self._handle_plateau(epoch, intervention_count, avg_grad_norm, total_plateau_count)
-                    intervention_count += 1
+                    self.logger.warning(f"   Note: Adaptive intervention only applied after SUSTAINED DEGRADATION (5+ epochs)")
+                    plateau_counter = 0  # Reset counter
                     plateau_counter = 0  # Reset counter after intervention
                     consecutive_degradation_epochs = 0  # Reset degradation counter after intervention
             
