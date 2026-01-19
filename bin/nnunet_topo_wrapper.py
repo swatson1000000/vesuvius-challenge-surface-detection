@@ -542,6 +542,7 @@ class TopologyAwareTrainer:
                     self._handle_plateau(epoch, intervention_count, avg_grad_norm, total_plateau_count)
                     intervention_count += 1
                     plateau_counter = 0  # Reset counter after intervention
+                    consecutive_degradation_epochs = 0  # Reset degradation counter after intervention
             
             # Early stopping
             if patience_counter >= early_stopping_patience:
