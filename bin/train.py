@@ -309,7 +309,7 @@ def train_single_fold(fold: int, config: dict, data_dir: Path, device: torch.dev
         from torch.optim.swa_utils import AveragedModel, SWALR
         swa_model = AveragedModel(model)
         swa_scheduler = SWALR(trainer.optimizer, swa_lr=config.get('swa_lr', 0.00005))
-        swa_start = config.get('swa_start_epoch', 40)  # Changed from 50 to 40
+        swa_start = config.get('swa_start_epoch', 30)  # SWA starts at epoch 30
         logger.info(f"SWA enabled: will start at epoch {swa_start} with LR {config.get('swa_lr', 0.00005)}")
     
     # Train
@@ -320,7 +320,7 @@ def train_single_fold(fold: int, config: dict, data_dir: Path, device: torch.dev
     trainer_config = {
         'swa_model': swa_model,
         'swa_scheduler': swa_scheduler,
-        'swa_start_epoch': config.get('swa_start_epoch', 40),  # Changed from 50 to 40
+        'swa_start_epoch': config.get('swa_start_epoch', 30),  # SWA starts at epoch 30
         'noise_enabled': config.get('noise_enabled', False),
         'noise_start_epoch': config.get('noise_start_epoch', 30),
         'noise_frequency': config.get('noise_frequency', 10),
@@ -333,7 +333,7 @@ def train_single_fold(fold: int, config: dict, data_dir: Path, device: torch.dev
     trainer.train(
         train_loader=train_loader,
         val_loader=val_loader,
-        num_epochs=config.get('num_epochs', 300),
+        num_epochs=config.get('num_epochs', 50),
         scheduler=scheduler,
         early_stopping_patience=config.get('early_stopping_patience', 50),
         **trainer_config
