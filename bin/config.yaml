@@ -8,7 +8,7 @@ depth: 4  # Keep at 4 for reasonable training time
 
 # Training parameters
 batch_size: 2  # Adjust based on GPU memory
-num_epochs: 100  # TRIAL RUN: reduced from 300 for validation
+num_epochs: 50  # Optimized: maximum epochs with SWA at 30
 learning_rate: 0.0001  # CONSERVATIVE: stable starting point
 weight_decay: 0.01  # Standard weight decay
 warmup_epochs: 5  # Gradual warmup to prevent instability
@@ -52,7 +52,7 @@ grad_clip_norm: 0.5  # AGGRESSIVE gradient clipping to prevent explosion
 
 # Stochastic Weight Averaging (SWA)
 swa_enabled: true
-swa_start_epoch: 40  # Start SWA after this epoch (changed from 50 to 40)
+swa_start_epoch: 30  # Start SWA after this epoch (optimized for faster convergence)
 swa_lr: 0.00005  # SWA learning rate (typically half of base LR)
 swa_update_freq: 5  # Update averaged model every N epochs
 
