@@ -12,6 +12,7 @@ from pathlib import Path
 import logging
 
 from topology_losses import CombinedTopologyLoss
+from torch.optim.swa_utils import update_bn
 
 
 class TopologyAwareUNet3D(nn.Module):
@@ -570,7 +571,7 @@ class TopologyAwareTrainer:
         # Finalize SWA if enabled
         if swa_model is not None:
             self.logger.info(f"🔄 Finalizing SWA...")
-            swa_model.update_bn(train_loader, device=self.device)
+            update_bn(train_loader, swa_model, device=self.device)
             # Load SWA model parameters
             self.model = swa_model.module
             self.logger.info(f"✓ SWA finalization complete")
