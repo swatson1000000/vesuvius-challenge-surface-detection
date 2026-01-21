@@ -597,8 +597,8 @@ class TopologyAwareTrainer:
         import random
         
         # Progressive aggressiveness: each plateau we've seen makes interventions more aggressive
-        # plateau 1: multiplier = 1.0x, plateau 2: 1.3x, plateau 3: 1.6x, plateau 4: 1.9x, etc.
-        plateau_aggressiveness_multiplier = 1.0 + (total_plateau_count - 1) * 0.3
+        # plateau 1: multiplier = 1.0x, plateau 2: 1.33x, plateau 3: 1.66x, plateau 4: 1.99x, etc.
+        plateau_aggressiveness_multiplier = 1.0 + (total_plateau_count - 1) * 0.33
         
         self.logger.warning(f"🔧 Applying adaptive intervention #{intervention_num + 1} (plateau #{total_plateau_count}, aggressiveness: {plateau_aggressiveness_multiplier:.1f}x)")
         
