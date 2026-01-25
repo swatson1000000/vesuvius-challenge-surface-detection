@@ -13,18 +13,15 @@ import base64
 from datetime import datetime
 from pathlib import Path
 
-try:
-    from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail
-    SENDGRID_AVAILABLE = True
-except ImportError:
-    SENDGRID_AVAILABLE = False
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # Configuration
 LOG_DIR = "/home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/log"
 RECIPIENT_EMAIL = "swatson1000000@gmail.com"
-SENDER_EMAIL = "swatson1000000@gmail.com"  # Must match verified sender in SendGrid
-SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")  # Set via environment variable
+SENDER_EMAIL = "swatson1000000@gmail.com"
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")  # Set via .monitor_env
 
 def get_latest_log():
     """Get the latest training log file"""
@@ -98,7 +95,7 @@ def parse_training_status(log_file):
     return status
 
 def send_email(status):
-    """Send training status email via SendGrid"""
+    """Send training status email via Gmail SMTP"""
     try:
         # Format email content
         if "error" in status:
@@ -140,30 +137,30 @@ RECENT LOG LINES
             for line in status['last_lines']:
                 body += f"{line}\n"
         
-        # Try to send via SendGrid
+        # Try to send via Gmail SMTP
         email_sent = False
-        if SENDGRID_AVAILABLE and SENDGRID_API_KEY:
+        if GMAIL_APP_PASSWORD:
             try:
-                message = Mail(
-                    from_email=SENDER_EMAIL,
-                    to_emails=RECIPIENT_EMAIL,
-                    subject=subject,
-                    plain_text_content=body
-                )
-                sg = SendGridAPIClient(SENDGRID_API_KEY)
-                response = sg.send(message)
-                if response.status_code == 202:
-                    print(f"✅ Email sent via SendGrid")
-                    email_sent = True
-                else:
-                    print(f"⚠️ SendGrid returned status {response.status_code}")
+                print(f"📧 Sending via Gmail SMTP...")
+                server = smtplib.SMTP("smtp.gmail.com", 587, timeout=10)
+                server.starttls()
+                server.login(SENDER_EMAIL, GMAIL_APP_PASSWORD)
+                
+                message = MIMEMultipart()
+                message["From"] = SENDER_EMAIL
+                message["To"] = RECIPIENT_EMAIL
+                message["Subject"] = subject
+                message.attach(MIMEText(body, "plain"))
+                
+                server.sendmail(SENDER_EMAIL, RECIPIENT_EMAIL, message.as_string())
+                server.quit()
+                
+                print(f"✅ Email sent via Gmail SMTP to {RECIPIENT_EMAIL}")
+                email_sent = True
             except Exception as e:
-                print(f"⚠️ SendGrid error: {e}")
+                print(f"⚠️ Gmail SMTP error: {e}")
         else:
-            if not SENDGRID_API_KEY:
-                print("⚠️ SENDGRID_API_KEY not set - use local logging only")
-            else:
-                print("⚠️ SendGrid package not available")
+            print("⚠️ GMAIL_APP_PASSWORD not set - email disabled")
         
         # Always log to local status file
         status_file = "/home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/log/monitor_status.txt"

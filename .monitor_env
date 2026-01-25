@@ -1,6 +1,2 @@
-# SendGrid API Key (get from https://app.sendgrid.com/settings/api_keys)
-# Format: export SENDGRID_API_KEY="SG.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-# export SENDGRID_API_KEY=""
-
-# Old Gmail config (not working - replaced with SendGrid)
-# export GMAIL_APP_PASSWORD="ge88KarSm@"
+# Gmail App Password for SMTP (16 chars, no spaces)
+export GMAIL_APP_PASSWORD="vlgnlhkifapctzjg"
