@@ -91,7 +91,7 @@ def parse_training_status(log_file):
     return status
 
 def send_email(status):
-    """Send status via local logging (email delivery temporarily disabled)"""
+    """Log training status to file (email via postfix has auth issues)"""
     try:
         # Format email content
         if "error" in status:
@@ -133,13 +133,13 @@ RECENT LOG LINES
             for line in status['last_lines']:
                 body += f"{line}\n"
         
-        # Log to monitoring status file
+        # Log to monitoring status file (will be checked manually)
         status_file = "/home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/log/monitor_status.txt"
         with open(status_file, "w") as f:
             f.write(f"Subject: {subject}\n\n{body}\n")
         
         print(f"✅ Status logged to monitor_status.txt")
-        print(f"📧 Email delivery: {RECIPIENT_EMAIL}")
+        print(f"📧 Check: tail log/monitor_status.txt")
         return True
         
     except Exception as e:
