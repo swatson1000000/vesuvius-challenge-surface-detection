@@ -23,7 +23,7 @@ except ImportError:
 # Configuration
 LOG_DIR = "/home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/log"
 RECIPIENT_EMAIL = "swatson1000000@gmail.com"
-SENDER_EMAIL = "noreply@trainingmonitor.local"
+SENDER_EMAIL = "swatson1000000@gmail.com"  # Must match verified sender in SendGrid
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")  # Set via environment variable
 
 def get_latest_log():
