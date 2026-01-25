@@ -1,0 +1,87 @@
+# Configuration for Topology-Aware nnU-Net Training - v2 (Fixed Foreground Bias)
+
+# Model architecture
+in_channels: 1
+out_channels: 1
+initial_filters: 32  # Larger model for better capacity
+depth: 4  # Reasonable training time
+
+# Training parameters
+batch_size: 2
+num_epochs: 300
+learning_rate: 0.0001
+weight_decay: 0.01
+warmup_epochs: 5
+
+# Data parameters
+patch_size: [128, 128, 128]
+num_workers: 4
+
+# Cross-validation
+n_folds: 5
+
+# Loss weights - FIXED FOR OVER-PREDICTING FOREGROUND
+# Previous Issue: Model predicted 95.65% FG vs actual 60.90% in training labels
+# Analysis showed: High recall (96.49%) but LOW precision (60.82%)
+# = Model over-predicts foreground to achieve high recall
+# 
+# Fix Strategy: Reduce recall penalty, increase precision penalty
+# - Lower focal_weight to reduce hard negative focus
+# - Increase dice_weight to enforce overlap accuracy
+# - Increase boundary_weight to be stricter on edges
+loss_weights:
+  dice_weight: 0.4        # INCREASED from 0.2 → enforce correct overlap
+  focal_weight: 0.25      # DECREASED from 0.4 → reduce aggressive background mining
+  variance_weight: 0.2    # DECREASED from 0.3 → less regularization needed
+  boundary_weight: 0.1    # INCREASED from 0.05 → penalize boundary errors more
+  cldice_weight: 0.05     # Keep enabled for topology
+  connectivity_weight: 0.0  # Keep disabled
+
+# Focal loss parameters - inverted alpha to penalize false foreground
+# New: Focus MORE on background (false positives in foreground)
+focal_gamma: 2.0
+focal_alpha: 0.4        # DECREASED from 0.75 → penalize FG false positives more
+
+# Class weights - CORRECTED to penalize false foreground
+# The training labels are ~60% FG, ~40% BG
+# Previous weights were backwards - penalized FG errors less
+use_class_weights: true
+background_weight: 1.0      # DECREASED from 2.94 → less penalty for missing background
+foreground_weight: 3.0      # INCREASED from 1.52 → MORE penalty for false foreground
+
+# Learning rate scheduler
+scheduler_type: "cosine_warm_restarts"
+scheduler_patience: 10
+scheduler_factor: 0.5
+T_0: 10
+T_mult: 2
+eta_min: 0.000001
+grad_clip_norm: 0.5
+
+# Stochastic Weight Averaging (SWA)
+swa_enabled: true
+swa_start_epoch: 40
+swa_lr: 0.00005
+swa_update_freq: 5
+
+# Weight noise injection for plateau escape
+noise_enabled: true
+noise_start_epoch: 30
+noise_frequency: 10
+noise_std: 0.001
+noise_decay: 0.9
+noise_target_layers: ['decoders', 'output']
+
+# Early stopping
+early_stopping_patience: 50
+
+# Catastrophic degradation detection
+catastrophic_degradation_threshold: 0.15
+
+# Post-processing - INCREASED threshold to reduce false foreground
+postprocess:
+  threshold: 0.7          # INCREASED from 0.5 → more conservative foreground prediction
+  min_component_size: 100
+  max_hole_size: 50
+  morphology_kernel_size: 2
+  separate_instances: false

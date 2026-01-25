@@ -8,8 +8,8 @@ depth: 4  # Keep at 4 for reasonable training time
 
 # Training parameters
 batch_size: 2  # Adjust based on GPU memory
-num_epochs: 50  # Optimized: maximum epochs with SWA at 30
-learning_rate: 0.0001  # CONSERVATIVE: stable starting point
+num_epochs: 300  # Extended training for convergence
+learning_rate: 0.0001    # CONSERVATIVE: stable starting point
 weight_decay: 0.01  # Standard weight decay
 warmup_epochs: 5  # Gradual warmup to prevent instability
 
@@ -20,6 +20,8 @@ num_workers: 4
 # Cross-validation
 n_folds: 5
 
+# Loss weights - FOCUSED ON 30-70% CLASS BALANCE WITH REGULARIZATION
+# Goal: Train model to predict 30-70% background distribution
 # Loss weights - REBALANCED TO FIX FOREGROUND BIAS
 # Previous: 99.88% FG vs 57.70% training labels (+42% overestimation)
 # Fix: Increase focal + variance to penalize overconfident FG predictions
@@ -52,7 +54,7 @@ grad_clip_norm: 0.5  # AGGRESSIVE gradient clipping to prevent explosion
 
 # Stochastic Weight Averaging (SWA)
 swa_enabled: true
-swa_start_epoch: 30  # Start SWA after this epoch (optimized for faster convergence)
+swa_start_epoch: 40  # Start SWA after this epoch (changed from 50 to 40)
 swa_lr: 0.00005  # SWA learning rate (typically half of base LR)
 swa_update_freq: 5  # Update averaged model every N epochs
 
@@ -71,6 +73,10 @@ early_stopping_patience: 50
 # Automatically rolls back to best model if loss degrades by this fraction
 # Example: threshold=0.15 means rollback if loss > 1.15x best loss
 catastrophic_degradation_threshold: 0.15  # 15% increase triggers rollback
+# Options:
+#   0.10 (10%)  - Very aggressive, catches early degradation
+#   0.15 (15%)  - Balanced (recommended - default)
+#   0.25 (25%)  - Conservative, only catches major degradation
 # Options:
 #   0.10 (10%)  - Very aggressive, catches early degradation
 #   0.15 (15%)  - Balanced (recommended - default)

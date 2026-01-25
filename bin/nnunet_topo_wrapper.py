@@ -261,7 +261,7 @@ class TopologyAwareTrainer:
               scheduler=None,
               metric_fn=None,
               early_stopping_patience: int = 50,
-              plateau_patience: int = 2,
+              plateau_patience: int = 5,  # Increased from 2 to 5 - need 5 epochs without improvement to trigger intervention
               plateau_threshold: float = 0.002,
               substantial_progress_threshold: float = 0.3,
               catastrophic_degradation_threshold: float = 0.15,
@@ -308,7 +308,7 @@ class TopologyAwareTrainer:
         best_loss_ever = float('inf')  # Track absolute best loss across all epochs
         baseline_loss = None  # Track starting loss for substantial progress detection
         intervention_count = 0
-        max_interventions = 3
+        max_interventions = 3  # Allow up to 3 interventions with stronger measures
         
         # Track consecutive epochs of degradation (validation loss worse than best)
         consecutive_degradation_epochs = 0
@@ -596,29 +596,30 @@ class TopologyAwareTrainer:
         """
         import random
         
-        # Progressive aggressiveness: each plateau we've seen makes interventions more aggressive
-        # plateau 1: multiplier = 1.0x, plateau 2: 1.33x, plateau 3: 1.66x, plateau 4: 1.99x, etc.
-        plateau_aggressiveness_multiplier = 1.0 + (total_plateau_count - 1) * 0.33
+        # Progressive aggressiveness: Escalating strategy
+        # plateau 1: multiplier = 1.0x, plateau 2: 1.3x, plateau 3: 1.6x
+        # More aggressive scaling to escape difficult plateaus
+        plateau_aggressiveness_multiplier = 1.0 + (total_plateau_count - 1) * 0.3
         
         self.logger.warning(f"🔧 Applying adaptive intervention #{intervention_num + 1} (plateau #{total_plateau_count}, aggressiveness: {plateau_aggressiveness_multiplier:.1f}x)")
         
-        # Determine adaptive LR scaling based on gradient norms
+        # Determine adaptive LR scaling based on gradient norms - MORE AGGRESSIVE
         if avg_gradient_norm is not None:
             if avg_gradient_norm < 0.01:
-                lr_scale = 25.0  # Very small gradients - need very aggressive boost
-                self.logger.warning(f"→ Very small gradient norm ({avg_gradient_norm:.4f}) - very aggressive LR scaling")
+                lr_scale = 35.0  # Very small gradients - extremely aggressive
+                self.logger.warning(f"→ Very small gradient norm ({avg_gradient_norm:.4f}) - extremely aggressive LR scaling")
             elif avg_gradient_norm < 0.1:
-                lr_scale = 15.0  # Small gradients - aggressive boost
-                self.logger.warning(f"→ Small gradient norm ({avg_gradient_norm:.4f}) - aggressive LR scaling")
+                lr_scale = 25.0  # Small gradients - very aggressive boost
+                self.logger.warning(f"→ Small gradient norm ({avg_gradient_norm:.4f}) - very aggressive LR scaling")
             elif avg_gradient_norm > 0.5:
-                lr_scale = 5.0   # Large gradients - moderate boost
-                self.logger.warning(f"→ Large gradient norm ({avg_gradient_norm:.4f}) - moderate LR scaling")
+                lr_scale = 12.0   # Large gradients - strong boost
+                self.logger.warning(f"→ Large gradient norm ({avg_gradient_norm:.4f}) - strong LR scaling")
             else:
-                lr_scale = 8.0   # Normal gradients - strong boost
-                self.logger.warning(f"→ Normal gradient norm ({avg_gradient_norm:.4f}) - strong LR scaling")
+                lr_scale = 20.0   # Normal gradients - very strong boost
+                self.logger.warning(f"→ Normal gradient norm ({avg_gradient_norm:.4f}) - very strong LR scaling")
         else:
-            # Fallback: use fixed scaling based on intervention number
-            lr_scales = [12.0, 8.0, 5.0]
+            # Fallback: use fixed scaling based on intervention number - INCREASED
+            lr_scales = [25.0, 20.0, 15.0]
             lr_scale = lr_scales[min(intervention_num, 2)]
         
         # Apply progressive aggressiveness multiplier based on total plateaus
@@ -648,66 +649,25 @@ class TopologyAwareTrainer:
             new_lr = self.base_lr * lr_scale  # Maintain full aggression (not reduced)
             self.logger.warning(f"→ Aggressive LR increase: {self.base_lr:.6f} → {new_lr:.6f}")
             
-            # Stochastic loss combinations to explore different regions
-            loss_mixes = [
-                {'dice': 0.6, 'focal': 0.4, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
-                {'dice': 0.5, 'focal': 0.5, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
-                {'dice': 0.4, 'focal': 0.6, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
-                {'dice': 0.7, 'focal': 0.3, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
-                {'dice': 0.5, 'focal': 0.3, 'variance': 0.2, 'boundary': 0.0, 'cldice': 0.0},
-            ]
-            selected_mix = random.choice(loss_mixes)
-            self.logger.warning(f"→ Stochastic loss mix: Dice={selected_mix['dice']}, "
-                               f"Focal={selected_mix['focal']}, Variance={selected_mix['variance']}")
+            # NOTE: DISABLED loss weight changes as they corrupt model training
+            # Instead, only apply learning rate adjustment
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = new_lr
+            self.base_lr = new_lr
+            
+            self.logger.warning(f"→ Keeping original loss weights (disabled stochastic mix to prevent corruption)")
+        
+        elif intervention_num == 2:
+            # Third intervention: Strong LR boost for last-resort plateau escape
+            # Apply full learning rate aggression
+            new_lr = self.base_lr * lr_scale * 0.8  # 80% of aggressive scaling (still strong)
+            self.logger.warning(f"→ Strong LR increase (last resort): {self.base_lr:.6f} → {new_lr:.6f}")
             
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = new_lr
             self.base_lr = new_lr
             
-            # Apply stochastic loss weights
-            if hasattr(self.criterion, 'dice_weight'):
-                self.criterion.dice_weight = selected_mix['dice']
-                self.criterion.focal_weight = selected_mix['focal']
-                self.criterion.variance_weight = selected_mix['variance']
-                self.criterion.boundary_weight = selected_mix['boundary']
-                self.criterion.cldice_weight = selected_mix['cldice']
-                self.criterion.connectivity_weight = 0.0
-        
-        elif intervention_num == 2:
-            # Third intervention: Aggressive exploration with stochastic loss from full palette
-            new_lr = self.base_lr * lr_scale * 0.8  # High but slightly controlled
-            self.logger.warning(f"→ Aggressive final intervention: {self.base_lr:.6f} → {new_lr:.6f}")
-            self.logger.warning(f"→ Using aggressive stochastic loss exploration with full palette")
-            
-            # Reset optimizer with aggressive LR
-            self.optimizer = torch.optim.AdamW(
-                self.model.parameters(),
-                lr=new_lr,
-                weight_decay=0.01
-            )
-            self.base_lr = new_lr
-            
-            # More aggressive stochastic loss combinations (includes boundary and cldice)
-            loss_mixes_aggressive = [
-                {'dice': 0.8, 'focal': 0.2, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
-                {'dice': 0.3, 'focal': 0.7, 'variance': 0.0, 'boundary': 0.0, 'cldice': 0.0},
-                {'dice': 0.5, 'focal': 0.3, 'variance': 0.2, 'boundary': 0.0, 'cldice': 0.0},
-                {'dice': 0.4, 'focal': 0.3, 'variance': 0.1, 'boundary': 0.1, 'cldice': 0.1},
-                {'dice': 0.6, 'focal': 0.2, 'variance': 0.1, 'boundary': 0.1, 'cldice': 0.0},
-            ]
-            selected_mix = random.choice(loss_mixes_aggressive)
-            self.logger.warning(f"→ Aggressive loss mix: Dice={selected_mix['dice']:.2f}, "
-                               f"Focal={selected_mix['focal']:.2f}, Variance={selected_mix['variance']:.2f}, "
-                               f"Boundary={selected_mix['boundary']:.2f}, clDice={selected_mix['cldice']:.2f}")
-            
-            # Apply aggressive stochastic loss weights
-            if hasattr(self.criterion, 'dice_weight'):
-                self.criterion.dice_weight = selected_mix['dice']
-                self.criterion.focal_weight = selected_mix['focal']
-                self.criterion.variance_weight = selected_mix['variance']
-                self.criterion.boundary_weight = selected_mix['boundary']
-                self.criterion.cldice_weight = selected_mix['cldice']
-                self.criterion.connectivity_weight = 0.0
+            self.logger.warning(f"→ Keeping original loss weights (disabled stochastic mix to prevent corruption)")
         
         self.logger.warning(f"✓ Adaptive intervention complete. Continuing training...")
     
