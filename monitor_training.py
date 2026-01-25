@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Training Monitor - Emails status updates every 30 minutes
+Training Monitor - Emails status updates every 30 minutes using SendGrid
 Reads latest training log and sends metrics to email
 """
 
@@ -13,11 +13,18 @@ import base64
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail
+    SENDGRID_AVAILABLE = True
+except ImportError:
+    SENDGRID_AVAILABLE = False
+
 # Configuration
 LOG_DIR = "/home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/log"
 RECIPIENT_EMAIL = "swatson1000000@gmail.com"
-SENDER_EMAIL = "swatson1000000@gmail.com"
-GMAIL_APP_PASSWORD = "YOUR_GMAIL_APP_PASSWORD"  # Set via environment variable
+SENDER_EMAIL = "noreply@trainingmonitor.local"
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")  # Set via environment variable
 
 def get_latest_log():
     """Get the latest training log file"""
@@ -91,7 +98,7 @@ def parse_training_status(log_file):
     return status
 
 def send_email(status):
-    """Log training status to file (email via postfix has auth issues)"""
+    """Send training status email via SendGrid"""
     try:
         # Format email content
         if "error" in status:
@@ -133,17 +140,41 @@ RECENT LOG LINES
             for line in status['last_lines']:
                 body += f"{line}\n"
         
-        # Log to monitoring status file (will be checked manually)
+        # Try to send via SendGrid
+        email_sent = False
+        if SENDGRID_AVAILABLE and SENDGRID_API_KEY:
+            try:
+                message = Mail(
+                    from_email=SENDER_EMAIL,
+                    to_emails=RECIPIENT_EMAIL,
+                    subject=subject,
+                    plain_text_content=body
+                )
+                sg = SendGridAPIClient(SENDGRID_API_KEY)
+                response = sg.send(message)
+                if response.status_code == 202:
+                    print(f"✅ Email sent via SendGrid")
+                    email_sent = True
+                else:
+                    print(f"⚠️ SendGrid returned status {response.status_code}")
+            except Exception as e:
+                print(f"⚠️ SendGrid error: {e}")
+        else:
+            if not SENDGRID_API_KEY:
+                print("⚠️ SENDGRID_API_KEY not set - use local logging only")
+            else:
+                print("⚠️ SendGrid package not available")
+        
+        # Always log to local status file
         status_file = "/home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/log/monitor_status.txt"
         with open(status_file, "w") as f:
             f.write(f"Subject: {subject}\n\n{body}\n")
         
         print(f"✅ Status logged to monitor_status.txt")
-        print(f"📧 Check: tail log/monitor_status.txt")
         return True
         
     except Exception as e:
-        print(f"❌ Error logging status: {e}")
+        print(f"❌ Error in send_email: {e}")
         return False
 
 def main():
