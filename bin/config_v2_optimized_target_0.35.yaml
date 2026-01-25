@@ -8,7 +8,7 @@ depth: 4
 
 # Training parameters
 batch_size: 2
-num_epochs: 300          # Extended for convergence (was 50)
+num_epochs: 300          # Extended for convergence
 learning_rate: 0.0001
 weight_decay: 0.01
 warmup_epochs: 5
@@ -38,7 +38,7 @@ focal_alpha: 0.4        # BALANCED - penalize FG false positives moderately
 # Class weights - BALANCED TO REDUCE FALSE FG
 use_class_weights: true
 background_weight: 1.0      # REDUCED from original 2.94 (FG bias fix)
-foreground_weight: 3.0      # MODERATE penalty for false FG (not 3.6)
+foreground_weight: 2.0      # Reduced penalty for false FG (20% less aggressive)
 
 # Learning rate scheduler
 scheduler_type: "cosine_warm_restarts"
@@ -51,7 +51,7 @@ grad_clip_norm: 0.5
 
 # Stochastic Weight Averaging (SWA)
 swa_enabled: true
-swa_start_epoch: 40       # Later SWA start for stability (vs 30 in aggressive v3)
+swa_start_epoch: 50       # SWA starts at epoch 50
 swa_lr: 0.00005
 swa_update_freq: 5
 
