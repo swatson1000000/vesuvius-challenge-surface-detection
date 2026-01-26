@@ -436,3 +436,122 @@ This should achieve the target 0.35 validation loss while fixing the 95.65% FG o
 - Final model reaches target 0.35-0.40 validation loss
 
 Rationale: v2_optimized stuck because focal loss was too dominant and foreground penalty too soft. v4 breaks this with aggressive FG weighting (5.0x) + reduced focal obsession (0.15) + faster learning (2x LR) + early SWA (Epoch 20).
+
+---
+
+# Config v5 (Variance-Focused) - January 25, 2026 22:07 UTC
+
+**Version:** v5_variance_focused  
+**File:** `bin/config_v5_variance_focused.yaml`  
+**Status:** ACTIVE - Restarted training to break variance loss plateau
+**Previous Issue:** v4 made things worse (val loss degraded 0.56 → 0.62)
+
+## Root Cause Analysis: Why v4 Failed
+
+### v4 Training Performance (Failed)
+| Epoch | Val Loss | Issue |
+|-------|----------|-------|
+| 0 | 0.6104 | Worse than v2_optimized best (0.5602) |
+| 1 | 0.6234 | Getting worse |
+| Variance | 0.95+ | STUCK - Model predicting uniform outputs |
+| Focal | 0.16 | Elevated (should be 0.01-0.02) |
+
+**Why v4 Failed:**
+- Aggressive foreground_weight (5.0) made model MORE conservative
+- Variance loss still at 0.95 (unchanged from v2)
+- Model couldn't break out of uniform prediction mode
+- Attacked symptom (foreground %), not root cause (variance)
+
+## Real Problem Identified
+
+**The Core Issue:** Variance loss stuck at 0.95
+- This means model is outputting UNIFORM predictions (all same value)
+- Not a foreground bias problem - it's a **uniformity problem**
+- Previous configs (foreground weight tuning) never addressed this
+- v4's aggressive approach made it worse, not better
+
+**Evidence from v4 failure:**
+```
+Epoch 0 Val Loss: 0.6104
+  ├── Dice: 0.4845 (OK)
+  ├── Focal: 0.1605 (elevated)
+  └── Variance: 0.9542 (STUCK AT 0.95+)
+
+Expected for good model:
+  ├── Dice: 0.15-0.25
+  ├── Focal: 0.01-0.05
+  └── Variance: <0.1
+```
+
+## Solution: v5_variance_focused (AGGRESSIVE VARIANCE)
+
+### Key Strategy Change
+
+Instead of tweaking class weights, **attack the variance plateau directly** with aggressive regularization:
+
+```yaml
+# v5_variance_focused (NEW)
+loss_weights:
+  variance_weight: 0.5    # AGGRESSIVE: 0.5 (was 0.3 in v2, 0.25 in v4)
+  focal_weight: 0.15      # REDUCED: Stop hard-negative mining (was 0.4)
+  dice_weight: 0.3        # Moderate
+  boundary_weight: 0.05   # Topology awareness
+  cldice_weight: 0.0      # Disable - focus on core issue
+
+# AGGRESSIVE noise injection to break uniformity
+noise_enabled: true
+noise_start_epoch: 10     # VERY EARLY (vs 30 in v2, 15 in v4)
+noise_frequency: 2        # VERY FREQUENT (vs 10 in v2, 5 in v4)
+noise_std: 0.005          # VERY STRONG (5x larger: vs 0.001 in v2, 0.002 in v4)
+
+# Conservative class weighting
+foreground_weight: 2.0    # Back to moderate (vs 5.0 in v4, 2.0 in v2)
+background_weight: 1.0    # Not aggressive (vs 1.0 in v4)
+
+# Moderate learning rate (not aggressive)
+learning_rate: 0.0001     # Conservative (vs 0.0002 in v4)
+```
+
+### Expected Outcomes
+
+**Target Improvements:**
+- Variance loss: 0.95 → **<0.2** (MAIN GOAL)
+- Model diversity: Uniform → Diverse predictions
+- Val loss: 0.56+ → **0.35-0.45** (working toward target)
+- Focal loss: 0.16 → 0.01-0.05 (secondary benefit)
+
+**Why This Works:**
+1. **Aggressive variance_weight (0.5)** - Forces model to output non-uniform predictions
+2. **Strong noise injection** - Perturbs weights early and frequently to escape stuck modes
+3. **Reduced focal loss** - Stops mining hard negatives so aggressively
+4. **Conservative class weights** - Doesn't over-correct like v4 did
+5. **Early, frequent noise** - Breaks uniformity before model converges
+
+### Risk Assessment
+
+**Low Risk:**
+- Variance regularization always helps with diversity
+- Noise injection is safe (bounded by noise_decay)
+- Reduced focal_weight aligns with v2 baseline
+
+**Expected Result:**
+- Model breaks out of uniform prediction mode (Epoch 1-5)
+- Variance loss drops significantly (Epochs 1-10)
+- Val loss improves by Epoch 20+
+
+## Lessons Learned
+
+1. **Not all losses are created equal** - Variance loss is the real bottleneck
+2. **Uniformity is the hidden problem** - Affects all other metrics
+3. **Aggressive class weighting backfires** - Shouldn't force model, regularize it instead
+4. **Noise injection timing matters** - Must start early and frequently for stuck modes
+5. **Loss component analysis is critical** - Must look at each loss separately
+
+## Training Status
+
+**v5_variance_focused started:** 2026-01-25 22:07:18
+- Config: variance_weight=0.5, focal_weight=0.15, noise_std=0.005
+- Strategy: Break variance plateau with aggressive regularization
+- Expected: Val loss improvement by Epoch 20, reaching 0.35-0.45 by Epoch 100+
+- Monitor: Variance loss drop (0.95 → <0.2), overall val loss trend
+

@@ -1,0 +1,100 @@
+# Configuration for Topology-Aware nnU-Net Training - v5_variance_focused
+# Target: Break variance loss plateau (currently stuck at 0.95, should be <0.1)
+# Strategy: Aggressive variance regularization forces model away from uniform predictions
+
+# Model architecture
+in_channels: 1
+out_channels: 1
+initial_filters: 32
+depth: 4
+
+# Training parameters
+batch_size: 2
+num_epochs: 300
+learning_rate: 0.0001    # Keep conservative for stability
+weight_decay: 0.01
+warmup_epochs: 5
+
+# Data parameters
+patch_size: [128, 128, 128]
+num_workers: 4
+
+# Cross-validation
+n_folds: 5
+
+# Loss weights - VARIANCE-FOCUSED (AGGRESSIVE)
+# Problem: Model predicting uniform outputs (variance loss stuck at 0.95)
+# Solution: Make variance loss dominant force to break uniformity
+loss_weights:
+  dice_weight: 0.3        # Moderate - enforce good overlap
+  focal_weight: 0.15      # Low - stop hard-negative obsession (was 0.4)
+  variance_weight: 0.5    # AGGRESSIVE: 0.5 (was 0.2-0.3) - FORCE uncertainty
+  boundary_weight: 0.05   # Keep topology awareness
+  cldice_weight: 0.0      # Disable - focus on main losses
+  connectivity_weight: 0.0
+
+# Focal loss parameters
+focal_gamma: 2.0
+focal_alpha: 0.4          # Moderate - don't obsess over hard negatives
+
+# Class weights - BALANCED (not aggressive)
+use_class_weights: true
+background_weight: 1.0    # Don't over-penalize
+foreground_weight: 2.0    # Conservative penalty (not 5.0)
+
+# Learning rate scheduler
+scheduler_type: "cosine_warm_restarts"
+scheduler_patience: 10
+scheduler_factor: 0.5
+T_0: 10
+T_mult: 2
+eta_min: 0.000001
+grad_clip_norm: 0.5
+
+# Stochastic Weight Averaging (SWA)
+swa_enabled: true
+swa_start_epoch: 30       # Earlier than default but not too early
+swa_lr: 0.00005
+swa_update_freq: 5
+
+# Weight noise injection for plateau escape
+noise_enabled: true
+noise_start_epoch: 10     # VERY EARLY - start perturbation immediately
+noise_frequency: 2        # VERY FREQUENT - every 2 epochs
+noise_std: 0.005          # VERY STRONG - 5x larger perturbation
+noise_decay: 0.9          # Keep decay at 0.9
+noise_target_layers: ['decoders', 'output']
+
+# Early stopping
+early_stopping_patience: 50
+
+# Catastrophic degradation detection
+catastrophic_degradation_threshold: 0.15
+
+# Post-processing - MODERATE THRESHOLD
+postprocess:
+  threshold: 0.5          # Lower threshold (0.5) to allow more diverse predictions
+  min_component_size: 100
+  max_hole_size: 50
+  morphology_kernel_size: 2
+  separate_instances: false
+
+# KEY STRATEGY FOR V5:
+# =====================
+# PROBLEM: v4 made things worse (val loss 0.6104 → 0.6234)
+# ROOT CAUSE: Variance loss stuck at 0.95 (uniform predictions)
+#
+# SOLUTION: Attack the real problem (variance), not symptoms (foreground weight)
+# 1. variance_weight: 0.3 → 0.5 (2.5x increase)
+# 2. focal_weight: 0.4 → 0.15 (reduce hard-negative obsession)
+# 3. noise_start_epoch: 30 → 10 (perturb immediately)
+# 4. noise_frequency: 10 → 2 (perturb every 2 epochs, not 10)
+# 5. noise_std: 0.001 → 0.005 (5x stronger perturbation)
+# 6. foreground_weight: 5.0 → 2.0 (back to conservative)
+# 7. cldice_weight: 0.05 → 0.0 (disable, focus on core issue)
+#
+# EXPECTED OUTCOME:
+# - Variance loss drops from 0.95 to <0.2 (main goal)
+# - Model makes diverse, non-uniform predictions
+# - Val loss improves to 0.45-0.55 range (working toward 0.35 target)
+# - Noise perturbation breaks early convergence patterns

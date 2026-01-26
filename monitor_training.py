@@ -178,45 +178,34 @@ RECENT LOG LINES
         return False
 
 def main():
-    """Main monitoring function - runs continuously with 30-minute intervals"""
-    print(f"🚀 Starting continuous monitor (30-minute intervals)")
-    print(f"📅 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"🐍 Python: {sys.executable}\n")
+    """Main monitoring function - runs once and exits (designed for cron scheduling)"""
+    print(f"📊 Training Monitor - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{'='*60}")
     
-    run_count = 0
-    while True:
-        run_count += 1
-        print(f"\n{'='*60}")
-        print(f"📊 Monitor Run #{run_count} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"{'='*60}")
-        
-        log_file = get_latest_log()
-        
-        if not log_file:
-            print("❌ No training log found")
-            status = {"error": "No training log files found in " + LOG_DIR}
+    log_file = get_latest_log()
+    
+    if not log_file:
+        print("❌ No training log found")
+        status = {"error": "No training log files found in " + LOG_DIR}
+    else:
+        print(f"📄 Reading: {log_file}")
+        status = parse_training_status(log_file)
+        print(f"📊 Status: {status['status']}")
+        if status['latest_epoch'] is not None:
+            print(f"📈 Current Epoch: {status['latest_epoch']}")
+        if status['best_val_loss'] is not None and status['best_epoch'] is not None:
+            best_val = float(status['best_val_loss']) if isinstance(status['best_val_loss'], str) else status['best_val_loss']
+            print(f"✨ Best Val Loss: {best_val:.6f} @ Epoch {status['best_epoch']}")
         else:
-            print(f"📄 Reading: {log_file}")
-            status = parse_training_status(log_file)
-            print(f"📊 Status: {status['status']}")
-            if status['latest_epoch'] is not None:
-                print(f"📈 Current Epoch: {status['latest_epoch']}")
-            if status['best_val_loss'] is not None and status['best_epoch'] is not None:
-                best_val = float(status['best_val_loss']) if isinstance(status['best_val_loss'], str) else status['best_val_loss']
-                print(f"✨ Best Val Loss: {best_val:.6f} @ Epoch {status['best_epoch']}")
-            else:
-                print(f"⏳ No validation results yet")
-        
-        # Send email and log status
-        if send_email(status):
-            print("✅ Monitoring check complete")
-        else:
-            print("❌ Failed to send email")
-        
-        # Sleep for 30 minutes (1800 seconds)
-        print(f"\n⏰ Sleeping for 30 minutes...")
-        print(f"⏰ Next run at: {(datetime.now() + __import__('datetime').timedelta(seconds=1800)).strftime('%Y-%m-%d %H:%M:%S')}\n")
-        time.sleep(1800)
+            print(f"⏳ No validation results yet")
+    
+    # Send email and log status
+    if send_email(status):
+        print("✅ Monitor check complete")
+    else:
+        print("⚠️ Email send failed")
+    
+    print(f"{'='*60}")
 
 if __name__ == "__main__":
     main()
