@@ -22,6 +22,7 @@ from email.mime.multipart import MIMEMultipart
 LOG_DIR = "/home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/log"
 RECIPIENT_EMAIL = "swatson1000000@gmail.com"
 SENDER_EMAIL = "swatson1000000@gmail.com"
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")  # Set via .monitor_env
 
 def get_latest_log():
@@ -96,7 +97,7 @@ def parse_training_status(log_file):
     return status
 
 def send_email(status):
-    """Log training status to file (email disabled due to SSL/SMTP issues)"""
+    """Send training status email via Gmail SMTP"""
     try:
         # Format email content
         if "error" in status:
@@ -138,7 +139,32 @@ RECENT LOG LINES
             for line in status['last_lines']:
                 body += f"{line}\n"
         
-        # Always log to local status file (most reliable method)
+        # Send via Gmail SMTP
+        email_sent = False
+        if GMAIL_APP_PASSWORD:
+            try:
+                print(f"📧 Sending email via Gmail SMTP...")
+                server = smtplib.SMTP("smtp.gmail.com", 587, timeout=15)
+                server.starttls()
+                server.login(SENDER_EMAIL, GMAIL_APP_PASSWORD)
+                
+                message = MIMEMultipart()
+                message["From"] = SENDER_EMAIL
+                message["To"] = RECIPIENT_EMAIL
+                message["Subject"] = subject
+                message.attach(MIMEText(body, "plain"))
+                
+                server.sendmail(SENDER_EMAIL, RECIPIENT_EMAIL, message.as_string())
+                server.quit()
+                
+                print(f"✅ Email sent successfully!")
+                email_sent = True
+            except Exception as e:
+                print(f"⚠️ Gmail SMTP failed: {e}")
+        else:
+            print("⚠️ GMAIL_APP_PASSWORD not set")
+        
+        # Always log to local status file
         status_file = "/home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/log/monitor_status.txt"
         with open(status_file, "w") as f:
             f.write(f"Subject: {subject}\n\n{body}\n")
@@ -147,7 +173,7 @@ RECENT LOG LINES
         return True
         
     except Exception as e:
-        print(f"❌ Error logging status: {e}")
+        print(f"❌ Error in send_email: {e}")
         return False
 
 def main():
