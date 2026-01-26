@@ -1,0 +1,101 @@
+# Configuration for Topology-Aware nnU-Net Training - v4_aggressive_focal
+# Target: Break focal loss plateau by aggressive foreground weighting + earlier SWA
+
+# Model architecture
+in_channels: 1
+out_channels: 1
+initial_filters: 32
+depth: 4
+
+# Training parameters
+batch_size: 2
+num_epochs: 300          # Extended for convergence
+learning_rate: 0.0002    # INCREASED 2x from 0.0001 (needed to escape plateau)
+weight_decay: 0.01
+warmup_epochs: 3         # REDUCED from 5 (faster ramp-up)
+
+# Data parameters
+patch_size: [128, 128, 128]
+num_workers: 4
+
+# Cross-validation
+n_folds: 5
+
+# Loss weights - FOCAL LOSS REDUCTION STRATEGY
+# Problem: Focal loss stuck at 0.10-0.11 (should be 0.01-0.02)
+# Solution: Lower focal weight to prevent hard-negative mining from dominating
+loss_weights:
+  dice_weight: 0.45       # INCREASED slightly from 0.4 (main focus on overlap)
+  focal_weight: 0.15      # REDUCED from 0.25 to 0.15 (stop hard-negative obsession)
+  variance_weight: 0.25   # INCREASED from 0.2 (confidence penalty helps)
+  boundary_weight: 0.15   # INCREASED from 0.1 (enforce strict boundaries)
+  cldice_weight: 0.05     # Keep enabled for topology
+  connectivity_weight: 0.0
+
+# Focal loss parameters
+focal_gamma: 2.0
+focal_alpha: 0.3         # REDUCED from 0.4 (less aggressive on hard negatives)
+
+# Class weights - AGGRESSIVE FOREGROUND PENALTY
+# Problem: Model defaults to background predictions
+# Solution: Heavy penalty for missing foreground
+use_class_weights: true
+background_weight: 1.0
+foreground_weight: 5.0   # AGGRESSIVE: 5.0 (was 2.0, now 2.5x stronger)
+                         # This forces the model to prioritize FG detection
+
+# Learning rate scheduler
+scheduler_type: "cosine_warm_restarts"
+scheduler_patience: 8    # REDUCED from 10 (faster adaptation)
+scheduler_factor: 0.5
+T_0: 8                   # REDUCED from 10
+T_mult: 2
+eta_min: 0.000001
+grad_clip_norm: 0.5
+
+# Stochastic Weight Averaging (SWA) - EARLY TRIGGER
+swa_enabled: true
+swa_start_epoch: 20      # MUCH EARLIER from 50 (start averaging at epoch 20)
+swa_lr: 0.0001           # DOUBLED from 0.00005 (need stronger SWA to overcome plateau)
+swa_update_freq: 3       # INCREASED from 5 (more frequent averaging)
+
+# Weight noise injection for plateau escape
+noise_enabled: true
+noise_start_epoch: 15    # EARLIER from 30
+noise_frequency: 5       # MORE FREQUENT from 10 (stronger noise to escape stuck gradients)
+noise_std: 0.002         # DOUBLED from 0.001 (stronger perturbation)
+noise_decay: 0.85        # REDUCED from 0.9 (decay faster but use earlier)
+noise_target_layers: ['decoders', 'output']
+
+# Early stopping
+early_stopping_patience: 60   # INCREASED from 50 (give more time with new config)
+
+# Catastrophic degradation detection
+catastrophic_degradation_threshold: 0.15
+
+# Post-processing - SAME THRESHOLD
+postprocess:
+  threshold: 0.6         # Keep moderate threshold
+  min_component_size: 100
+  max_hole_size: 50
+  morphology_kernel_size: 2
+  separate_instances: false
+
+# KEY CHANGES FROM v2_optimized:
+# ================================
+# 1. foreground_weight: 2.0 → 5.0 (AGGRESSIVE: 2.5x stronger penalty for FG miss)
+# 2. focal_weight: 0.25 → 0.15 (REDUCED: stop focal loss from dominating)
+# 3. focal_alpha: 0.4 → 0.3 (Less aggressive hard-negative mining)
+# 4. learning_rate: 0.0001 → 0.0002 (2x faster learning to escape plateau)
+# 5. swa_start_epoch: 50 → 20 (EARLY: let SWA fix the plateau faster)
+# 6. swa_lr: 0.00005 → 0.0001 (DOUBLED: stronger weight averaging)
+# 7. noise_std: 0.001 → 0.002 (Stronger perturbation to escape)
+# 8. noise_start_epoch: 30 → 15 (Start escaping earlier)
+# 9. dice_weight: 0.4 → 0.45 (Slightly prioritize overlap)
+# 10. variance_weight: 0.2 → 0.25 (Penalize uncertain predictions more)
+#
+# EXPECTED OUTCOME:
+# - Focal loss should drop to 0.01-0.05 range (less obsessive on hard negatives)
+# - Dice loss should improve to 0.2-0.3 range (with stronger FG weight)
+# - Overall val loss target: 0.30-0.40 (vs current 0.56)
+# - Reduced plateau risk with earlier, stronger SWA + noise

@@ -1,0 +1,76 @@
+# Configuration for Topology-Aware nnU-Net Training - v3 (Aggressive, 50 Epochs, SWA@30)
+
+# Model architecture
+in_channels: 1
+out_channels: 1
+initial_filters: 32
+depth: 4
+
+# Training parameters - 50 EPOCHS TOTAL
+batch_size: 2
+num_epochs: 50           # REDUCED from 300 to 50
+learning_rate: 0.0001
+weight_decay: 0.01
+warmup_epochs: 5
+
+# Data parameters
+patch_size: [128, 128, 128]
+num_workers: 4
+
+# Cross-validation
+n_folds: 5
+
+# Loss weights - v3 (20% MORE AGGRESSIVE THAN v2)
+loss_weights:
+  dice_weight: 0.5        # INCREASED from 0.4 → enforce correct overlap even more
+  focal_weight: 0.15      # DECREASED from 0.25 → aggressively reduce hard negatives
+  variance_weight: 0.15   # DECREASED from 0.2 → allow more confident predictions
+  boundary_weight: 0.15   # INCREASED from 0.1 → much stricter on boundaries (20% up)
+  cldice_weight: 0.05     # Keep enabled for topology
+  connectivity_weight: 0.0
+
+# Focal loss parameters
+focal_gamma: 2.0
+focal_alpha: 0.3        # DECREASED from 0.4 → focus heavily on FG false positives
+
+# Class weights - 20% MORE AGGRESSIVE
+use_class_weights: true
+background_weight: 0.8      # DECREASED from 1.0 (20% reduction)
+foreground_weight: 3.6      # INCREASED from 3.0 (20% more penalty for false FG)
+
+# Learning rate scheduler
+scheduler_type: "cosine_warm_restarts"
+scheduler_patience: 10
+scheduler_factor: 0.5
+T_0: 10
+T_mult: 2
+eta_min: 0.000001
+grad_clip_norm: 0.5
+
+# Stochastic Weight Averaging (SWA) - KICKS IN AT EPOCH 30
+swa_enabled: true
+swa_start_epoch: 30      # SWA STARTS AT EPOCH 30 (was 40)
+swa_lr: 0.00005
+swa_update_freq: 5       # Update every 5 epochs, so at epochs 30, 35, 40, 45, 50
+
+# Weight noise injection for plateau escape
+noise_enabled: true
+noise_start_epoch: 30
+noise_frequency: 10
+noise_std: 0.001
+noise_decay: 0.9
+noise_target_layers: ['decoders', 'output']
+
+# Early stopping
+early_stopping_patience: 50
+
+# Catastrophic degradation detection
+catastrophic_degradation_threshold: 0.15
+
+# Post-processing - MORE CONSERVATIVE THRESHOLD
+postprocess:
+  threshold: 0.8          # INCREASED from 0.7 → only predict FG at >80% confidence
+  min_component_size: 100
+  max_hole_size: 50
+  morphology_kernel_size: 2
+  separate_instances: false

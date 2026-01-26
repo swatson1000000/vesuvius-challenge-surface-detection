@@ -380,3 +380,59 @@ v2_optimized preserves the FG bias fixes but with:
 
 This should achieve the target 0.35 validation loss while fixing the 95.65% FG over-prediction issue.
 
+
+---
+
+# Config v4 (Aggressive Focal + Foreground Weighting) - January 25, 2026 20:50 UTC
+
+**Version:** v4_aggressive_focal  
+**File:** `bin/config_v4_aggressive_focal.yaml`  
+**Status:** NEW - Created to break validation loss plateau at ~0.56
+**Problem:** v2_optimized training stalled at val loss 0.5602 (Epoch 9), degrading thereafter
+
+## Root Cause Analysis: Why v2_optimized Plateaued
+
+### Current Training Performance (v2_optimized)
+
+| Epoch | Train Loss | Val Loss | Status |
+|-------|-----------|----------|--------|
+| 9 | 0.5706 | **0.5602** | BEST |
+| 10 | 0.5659 | 0.5671 | Degraded +0.0069 |
+| 13 | 0.5653 | 0.5768 | Further degraded |
+| 14 | 0.5653 | 0.5703 | Still above best |
+| 15 | 0.5671 | 0.5637 | Slightly recovered |
+
+**Target:** 0.35 (gap: 0.56 - 0.35 = **0.21 = 60% worse than target**)
+
+### Loss Component Analysis
+
+- Dice loss stuck at ~0.48-0.50 (should be 0.15-0.25 in well-trained model)
+- Focal loss at 0.10-0.11 (should be 0.01-0.02)
+- Adaptive intervention triggered at Epoch 12 (LR scaled 32.5x - sign of plateau)
+- Foreground weight (2.0) too conservative to break bias
+
+## Solution: v4_aggressive_focal
+
+### Key Changes
+
+1. **foreground_weight: 2.0 → 5.0** - 2.5x more aggressive FG penalty
+2. **focal_weight: 0.25 → 0.15** - Reduce hard-negative mining (remove blocker)
+3. **learning_rate: 0.0001 → 0.0002** - Double LR to escape local minimum
+4. **swa_start_epoch: 50 → 20** - Start SWA early to stabilize weights
+5. **focal_alpha: 0.4 → 0.3** - Less aggressive hard-negative focus
+6. **noise_std: 0.001 → 0.002** - Stronger weight perturbation
+7. **noise_start_epoch: 30 → 15** - Earlier plateau escape mechanism
+
+### Expected Outcomes
+
+- Dice loss: 0.48 → 0.25-0.35 (50% improvement)
+- Focal loss: 0.10 → 0.01-0.05 (stop mining obsession)
+- Overall val loss: 0.56 → 0.30-0.40 (target reached)
+
+### Success Criteria
+
+- Val loss drops below 0.45 by Epoch 20
+- Plateau breaks (continuous improvement through Epoch 30+)
+- Final model reaches target 0.35-0.40 validation loss
+
+Rationale: v2_optimized stuck because focal loss was too dominant and foreground penalty too soft. v4 breaks this with aggressive FG weighting (5.0x) + reduced focal obsession (0.15) + faster learning (2x LR) + early SWA (Epoch 20).
