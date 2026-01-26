@@ -10,6 +10,7 @@ import glob
 import subprocess
 import json
 import base64
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -151,6 +152,9 @@ RECENT LOG LINES
 
 def main():
     """Main monitoring function"""
+    # Debug: Show Python environment
+    print(f"🐍 Python: {sys.executable}")
+    
     log_file = get_latest_log()
     
     if not log_file:
