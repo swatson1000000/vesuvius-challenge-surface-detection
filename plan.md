@@ -833,3 +833,122 @@ If successful plateau escape:
 3. Run inference to validate varied foreground ratios (not uniform)
 
 ---
+
+# CRITICAL FAILURE & RECOVERY - January 26, 2026 22:30 UTC
+
+## What Went Wrong: Aggressive Strategy Backfired
+
+**Timeline of Failure:**
+- **Epoch 5:** NEW BEST: 0.6286 (with 30x LR boost) ✓
+- **Epochs 6-11:** DIVERGENCE - model degrading rapidly
+  - Dice collapsing: 0.4425 → 0.4164
+  - Focal exploding: 0.1806 → 0.2471
+  - Variance worsening: 0.9702 → 0.9953
+  - Loss increasing: 0.6286 → 0.6633
+- **Epoch 11:** Plateau #3 triggered with 80x LR scaling (would have diverged further)
+
+**Root Cause:** Over-aggressive LR scaling (5.05x multiplier) destabilized model
+- 30x LR worked once (Epoch 5 escape)
+- But model couldn't sustain learning after - high LR broke gradient flow
+- 80x LR would only accelerate divergence
+
+**Lesson Learned:** Aggressive ≠ Better. Stability matters more than aggressive exploration.
+
+## Solution: Hybrid Conservative Strategy (Commit 1d752a2)
+
+### Changes Implemented
+
+**1. Revert LR Multiplier to Conservative:**
+```
+OLD: 1.5 + (plateau-1) × 0.85
+     Plateau 1: 1.5x, Plateau 3: 3.2x, Plateau 5: 5.05x
+
+NEW: 1.0 + (plateau-1) × 0.15
+     Plateau 1: 1.0x, Plateau 3: 1.3x, Plateau 5: 1.6x
+```
+- Maximum ever: 1.6x multiplier (vs 80x that was about to trigger)
+- Gradual escalation without shock
+
+**2. Rebalanced Loss Weights:**
+| Component | Was (Aggressive) | Now (Conservative) | Why |
+|-----------|-----------------|-------------------|-----|
+| Dice | 0.7 | 0.75 | Maintain spatial priority |
+| Focal | 0.2 | 0.15 | Prevent explosion |
+| Variance | 0.05 | 0.1 | **Restore regularization** |
+| Boundary | 0.05 | 0.0 | Simplify, not needed |
+
+**Variance weight increased 0.05→0.1:** Regularization was TOO weak, focal ran wild. Need variance to constrain loss landscape.
+
+**3. Switched Scheduler:**
+```
+OLD: CosineAnnealingWarmRestarts (T_0=10, T_mult=2)
+     - Forces LR restart every 10-20 epochs
+     - Causes repeated plateau cycles
+
+NEW: ReduceLROnPlateau (patience=5, factor=0.5)
+     - Responsive to actual loss behavior
+     - Only reduces LR when stuck
+     - More stable long-term learning
+```
+
+**4. Extended Training:**
+```
+OLD: 300 epochs
+NEW: 500 epochs
+```
+More time for natural exploration without forced restarts. Gradual escape instead of shock-and-awe.
+
+### Why Conservative Works
+
+1. **Stability First:** Model needs confidence in gradient direction, not shock
+2. **Sustainable Escapes:** Small perturbations (1.3x) let model explore without destabilizing
+3. **Regularization Restored:** Variance=0.1 keeps focal loss from exploding
+4. **Time-Based Escape:** 500 epochs lets model gradually work out of plateau region
+5. **Responsive Scheduler:** Plateau scheduler adapts to actual loss, not forced cycles
+
+### Expected Results
+
+**Best Case (50% probability):**
+- Escapes plateau gradually over 100-150 epochs
+- Reaches 0.55-0.60 range by epoch 250-300
+- Continues improving through epoch 500
+
+**Good Case (35% probability):**
+- Stays around 0.62-0.63 but doesn't diverge
+- Sustained learning, stable gradients
+- May escape plateau after epoch 200+
+
+**Worst Case (15% probability):**
+- Still stuck at 0.62-0.63 range
+- But model stable, not diverging (usable for submission)
+- Can then try advanced techniques (gradient noise, ensemble, etc.)
+
+### Monitoring Plan
+
+```bash
+# Watch for convergence
+grep "Epoch.*Val - Loss" log/train_CONSERVATIVE_*.log | tail -50
+
+# Key metrics:
+# 1. Val loss trend: Should be stable, ideally slowly decreasing
+# 2. Variance component: Should gradually reduce from 0.97 toward 0.5+
+# 3. No explosive focal losses (should stay <0.25)
+# 4. Dice should maintain 0.40-0.45 range (stable)
+```
+
+### If Still Stuck at Epoch 150+
+
+Then try one of these:
+1. **Gradient Perturbation** - Add noise to escape flat regions
+2. **Batch Size Variation** - Randomly vary 6-10 for symmetry breaking
+3. **Ensemble Approach** - Combine multiple checkpoint predictions
+4. **Extended to 750 epochs** - Let it run longer, may find escape
+
+### Critical Success Metrics
+
+- ✅ NO divergence (loss < 1.0)
+- ✅ Stable training (no explosions)
+- ✅ Gradual improvement (not staying flat)
+- ✅ Reachable submission (0.62+ is usable)
+
+------
