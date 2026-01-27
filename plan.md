@@ -951,4 +951,245 @@ Then try one of these:
 - ✅ Gradual improvement (not staying flat)
 - ✅ Reachable submission (0.62+ is usable)
 
-------
+---
+
+# Why Model Plateaus - Root Cause Analysis - January 26, 2026 23:00 UTC
+
+## The Fundamental Problem
+
+**Observation:** Model consistently plateaus at loss ≈ 0.61-0.65 within 5-20 epochs, regardless of configuration.
+- Different LR (0.0001, 0.0002, 0.0005)
+- Different batch sizes (2, 8, 12)
+- Different loss weights (multiple combinations)
+- Different schedulers (CosineRestart, Plateau)
+- **Result:** Always same plateau, ~0.63 loss
+
+This consistency suggests NOT a tuning issue, but a **structural limitation**.
+
+## Root Causes (10 Factors Analyzed)
+
+### 1. LOSS LANDSCAPE GEOMETRY ⭐⭐⭐
+**Most Important**
+- Plateau at 0.63 is a true **local minimum** (not saddle point)
+- Surrounded by flat region (gentle slopes)
+- Better minima exist but ~1.0+ units away
+- Sharp valley around 0.63 prevents escape with small LR
+- Huge LR causes divergence (oversteps valley)
+- **Evidence:** Small LR stable, large LR diverges → narrow basin
+
+### 2. VARIANCE LOSS CONSTRAINT ⭐⭐⭐⭐
+**Highest Priority - ARTIFICIAL CEILING**
+- Variance weight=0.1 forces variance loss ≥ 0.95
+- This is **hard constraint**, not soft regularization
+- Prevents model from making confident predictions
+- Better loss values require lower variance (0.5-0.7 range)
+- **Evidence:** Variance pinned at 0.95-0.99 every configuration
+
+**Implication:** Even if model escapes geometric minimum, variance constraint pulls it back.
+
+### 3. SCHEDULER TOO AGGRESSIVE ⭐⭐⭐
+- Patience=5 epochs with 53 batches = very responsive
+- Any small degradation triggers LR reduction
+- Model never gets sustained high LR to explore
+- Early LR drops prevent escape attempts
+- **Evidence:** Always converges in <20 epochs (scheduler kicks in)
+
+### 4. LOSS COMPONENT CONFLICT ⭐⭐
+- Dice improving → variance worsens
+- Focal loss explodes when variance reduced
+- Gradients from 3 components (dice, focal, variance) pull in different directions
+- Can't optimize all simultaneously
+- **Evidence:** Dice stuck at 0.42-0.50, focal oscillates, variance fixed at 0.95
+
+### 5. LEARNING RATE TOO CONSERVATIVE ⭐⭐
+- Base LR=0.000245 already small
+- Plateau multiplier max=1.6x = gentle nudge
+- Model needs **bold** exploration, not incremental steps
+- Conservative strategy designed to prevent divergence, but also prevents escape
+- **Evidence:** Huge LR (80x) caused divergence, tiny LR stuck at plateau
+
+### 6. BATCH SIZE PARADOX ⭐
+- Batch=12 → smoother gradients → less noise → harder to escape
+- Batch=2 → noisy gradients → more exploration → might escape but slower
+- Trade-off: Speed vs exploration
+- **Evidence:** All batch sizes plateau, just at different speeds
+
+### 7. INITIALIZATION CONSISTENCY
+- Every run starts with fresh random weights
+- All converge to similar loss (0.61-0.65 range)
+- Suggests basin is **robust** across initializations
+- **Evidence:** Different seeds would test this; not attempted
+
+### 8. DATA LIMITATIONS ⭐
+- 628 training samples for complex 3D segmentation
+- Vesuvius Challenge is inherently hard (papyrus texture)
+- High variance in labels suggests uncertainty
+- May be **data ceiling**: labels themselves ambiguous
+- **Evidence:** Variance=0.95+ = model detecting label uncertainty
+
+### 9. ARCHITECTURE CAPACITY
+- nnU-Net 22M params may be insufficient
+- Dice scores capped at 0.50 (not great for medical imaging)
+- Model may have learned all feasible patterns
+- **Evidence:** No improvement with more epochs/batch/LR
+
+### 10. OPTIMIZER LIMITATION
+- SGD tends to get stuck in sharp minima
+- Adam more adaptive but slower
+- No switching attempted
+- **Evidence:** SGD is standard choice, not optimized for this landscape
+
+## Combined Effect (Why All Fail)
+
+```
+┌─────────────────────────────────────────────┐
+│ Loss Landscape has Sharp Local Minimum      │
+│ Surrounding flat plateau with barriers      │
+│ Better minima far away (need bold steps)    │
+└─────────────────────────────────────────────┘
+                    ↓
+        Model converges to 0.63
+                    ↓
+┌─────────────────────────────────────────────┐
+│ THREE FORCES PREVENT ESCAPE:                │
+│                                             │
+│ 1. Variance loss = artificial ceiling (0.95)│
+│    Forces high uncertainty everywhere       │
+│                                             │
+│ 2. Scheduler = LR reduction on any wobble   │
+│    Stops exploration before it starts       │
+│                                             │
+│ 3. Conservative LR = gentle nudges          │
+│    Can't overcome geometric barrier         │
+└─────────────────────────────────────────────┘
+                    ↓
+            STUCK INDEFINITELY
+```
+
+## Solutions Ranked by Likelihood of Success
+
+### 🥇 SOLUTION 1: DISABLE VARIANCE LOSS [HIGHEST]
+```yaml
+# Current
+variance_weight: 0.1
+
+# New
+variance_weight: 0.0
+```
+**Why:** Remove artificial constraint. Variance=0.95+ is fake floor.
+**Expected:** Model can now improve when escaping plateau
+**Risk:** Low - variance was causing problems anyway
+**Timeline:** Test in 20 epochs
+
+### 🥈 SOLUTION 2: INCREASE BASE LEARNING RATE [HIGH]
+```yaml
+# Current
+learning_rate: 0.000245
+
+# New
+learning_rate: 0.0005  (2x increase)
+```
+**Why:** Conservative exploration failed; need bold steps to escape
+**Expected:** Larger steps through loss landscape
+**Risk:** Medium - may oscillate near plateau
+**Timeline:** Test in 20 epochs, monitor gradient stability
+
+### 🥉 SOLUTION 3: DISABLE SCHEDULER REDUCTION [MEDIUM]
+```yaml
+# Current
+scheduler_patience: 5
+
+# New
+scheduler_patience: 999  (effectively disabled)
+```
+**Why:** Let model explore at high LR without interruption
+**Expected:** Sustained exploration instead of early LR drops
+**Risk:** Medium - may oscillate or diverge without LR decay
+**Timeline:** Combine with Solution 2
+
+### SOLUTION 4: SIMPLIFY LOSS FUNCTION [MEDIUM]
+```yaml
+# Current (3 components fighting)
+dice_weight: 0.75
+focal_weight: 0.15
+variance_weight: 0.1
+
+# New (single component)
+dice_weight: 1.0
+focal_weight: 0.0
+variance_weight: 0.0
+```
+**Why:** Remove conflicting gradients. Pure spatial learning.
+**Expected:** Clearer gradient signal, escape plateau
+**Risk:** Medium - may train worse on edges/noise
+**Timeline:** Test as alternative to Solution 1
+
+### SOLUTION 5: INCREASE MODEL CAPACITY [MEDIUM]
+```yaml
+# Current
+initial_filters: 32
+
+# New
+initial_filters: 64  (2x parameters)
+```
+**Why:** More capacity to express complex surface patterns
+**Expected:** Model learns more nuanced segmentations
+**Risk:** High cost (2x slower training, more memory)
+**Timeline:** Only try if other solutions fail
+
+### SOLUTION 6: SWITCH OPTIMIZER [LOW]
+```python
+# Current
+optimizer: SGD
+
+# New
+optimizer: AdamW
+```
+**Why:** Different optimization dynamics might escape
+**Expected:** Adam's adaptive learning rates find different minima
+**Risk:** Low - safe to try
+**Timeline:** Backup plan if above fail
+
+### SOLUTION 7: CURRICULUM LEARNING [LOW]
+```
+Phase 1 (epochs 0-50): Dice only
+  dice_weight: 1.0, focal_weight: 0.0, variance_weight: 0.0
+
+Phase 2 (epochs 51-500): Add other losses
+  dice_weight: 0.75, focal_weight: 0.15, variance_weight: 0.1
+```
+**Why:** Learn simple before complex. Staged optimization.
+**Expected:** Foundation of dice learning prevents plateau
+**Risk:** Medium complexity to implement
+**Timeline:** Fallback after simpler solutions
+
+## Recommended Immediate Action
+
+**STOP current training and apply COMBO:**
+
+1. **Disable variance loss:** `variance_weight: 0.1 → 0.0`
+2. **Increase base LR:** `learning_rate: 0.000245 → 0.0005`
+3. **Disable scheduler:** `scheduler_patience: 5 → 999`
+4. **Restart** with these changes
+
+**Rationale:**
+- Removes artificial ceiling (variance)
+- Provides bold exploration (2x LR)
+- Prevents premature LR reduction (no patience)
+- **Combined effect:** Maximum freedom to escape
+
+**Expected outcome:**
+- Epochs 0-5: Same quick convergence to 0.63
+- Epochs 5-20: NEW - continued exploration instead of stuck
+- Epochs 20+: Either finds better minimum or oscillates (then dial back LR)
+
+**Success criteria:**
+- Loss continues decreasing past epoch 20 (currently stuck)
+- No divergence (loss stays <1.0)
+- Variance starts decreasing from 0.95 toward 0.5+
+- Dice score improves (from 0.45 → 0.50+)
+
+**If this works:** Model can escape → continue 500 epochs
+**If still stuck:** Try Solution 4 (Dice only) or Solution 5 (bigger model)
+
+---------
