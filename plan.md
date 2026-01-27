@@ -1193,3 +1193,73 @@ Phase 2 (epochs 51-500): Add other losses
 **If still stuck:** Try Solution 4 (Dice only) or Solution 5 (bigger model)
 
 ---------
+## Training History - v5 Through v7
+
+### v5_variance_focused (Jan 26-27, 2026)
+**Problem:** Plateau after epoch 5, uniform predictions
+- Variance weight: 0.5 (too aggressive)
+- Batch size: 2 (unstable gradients)
+- Result: **STUCK at loss 0.57** - model oscillated 0.57-0.62, never improved
+- Interventions: 19+ aggressive LR scalings (up to 92.5x base LR)
+- **Verdict:** ❌ FAILED - Variance loss weighting forced conflicting objectives
+
+### v6_fix_plateau (Jan 27, 2026, Epoch 15)
+**Problem Analysis:** v5 plateau caused by:
+1. Variance loss (0.5) creating conflicting objectives (uncertain vs correct)
+2. Small gradients triggering aggressive LR scaling (up to 92.5x)
+3. Massive LR causing training chaos instead of escape
+
+**Solution Implemented:**
+- Removed variance loss completely (0.5 → 0.0)
+- Increased batch size (2 → 4) for stable gradients
+- Capped LR scaling at 5.0x max (was 92.5x)
+- Dice weight: 0.8 (strong objective)
+
+**Results:**
+- Best loss: 0.6579 (Epoch 5)
+- Epochs 6-15: Oscillated 0.65-0.69, couldn't improve
+- Interventions: 2 (conservative, well-controlled)
+- **Verdict:** ⚠️ PARTIAL - Fixed chaos, but stuck in different local minimum
+
+**Root Cause:** Loss landscape itself was ill-conditioned; need gentle variance penalty
+
+### v7_batch8_smallvariance (Jan 27, 2026, Current)
+**Combined Solution (Options B+C):**
+
+**Option B - Larger Batch Size:**
+- Batch: 4 → 8
+- Better gradient estimates
+- Train batches: 157 → 79 (same data, consolidated)
+- Effect: Smoother training trajectory
+
+**Option C - Small Variance Penalty:**
+- Variance weight: 0.0 → 0.1 (goldilocks zone)
+- Why 0.1?
+  - v5: 0.5 (forced conflicting objectives) ❌
+  - v6: 0.0 (settled in confident-uniform state) ❌
+  - v7: 0.1 (gentle guidance without forcing) ✅
+- Effect: Prevents uniform predictions without forcing uncertainty
+
+**Loss Configuration:**
+```yaml
+dice_weight: 0.75          # Core objective
+focal_weight: 0.15         # Hard negatives
+variance_weight: 0.1       # Gentle uniformity penalty
+boundary_weight: 0.0       # Disabled
+total_weight: 1.0          # Balanced
+```
+
+**Expected Behavior:**
+- Epochs 1-5: Fast improvement (large batches = stable gradients)
+- Epochs 6-10: SHOULD break through 0.6579 barrier (variance helps)
+- Epochs 11+: Real learning continues, no oscillation in plateau zone
+
+**Key Insight:** Variance loss is like a regularizer:
+- Too much (0.5) = overconstrained, forces contradiction
+- Too little (0.0) = underconstrained, settles in local min
+- Just right (0.1) = guides without forcing ✅
+
+**Status:** Training started 2026-01-27 15:39:34
+- Configuration verified
+- Batch size increased (79 batches per epoch vs 157)
+- Monitoring for breakthrough past epoch 5

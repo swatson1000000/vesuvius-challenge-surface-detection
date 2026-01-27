@@ -1,0 +1,59 @@
+# Configuration for Topology-Aware nnU-Net Training - v7_batch8_smallvariance
+# Target: ESCAPE local minimum by combining larger batch size + small variance loss
+# Strategy: Better gradient estimates (batch 8) + gentle variance regularization (0.1)
+
+# Model architecture
+in_channels: 1
+out_channels: 1
+initial_filters: 32
+depth: 4
+
+# Training parameters
+batch_size: 8              # INCREASED: 4 → 8 (better gradient estimates)
+num_epochs: 100
+learning_rate: 0.001      # Standard starting LR
+weight_decay: 0.0001      # Conservative regularization
+warmup_epochs: 2          # Minimal warmup
+
+# Data parameters
+patch_size: [128, 128, 128]
+num_workers: 4
+
+# Cross-validation
+n_folds: 5
+
+# Loss weights - BALANCED WITH SMALL VARIANCE
+# v6 problem: Stuck in local minimum despite no loss conflicts
+# Solution: Add back SMALL variance loss (0.1) to gently prevent uniformity
+#           + larger batch size for stable gradients
+loss_weights:
+  dice_weight: 0.75       # Slightly reduced to allow variance influence
+  focal_weight: 0.15      # Stable
+  variance_weight: 0.1    # SMALL: Prevents uniformity without forcing conflicts (was 0.5 in v5, 0.0 in v6)
+  boundary_weight: 0.0    # Disable - focus on core objectives
+  cldice_weight: 0.0      # Disable
+  connectivity_weight: 0.0
+
+# Focal loss parameters
+focal_gamma: 2.0
+focal_alpha: 0.35
+
+# Class weights - BALANCED
+use_class_weights: true
+background_weight: 1.0
+foreground_weight: 1.5    # Gentle - don't over-penalize
+
+# Learning rate scheduler
+scheduler_type: "plateau"
+scheduler_patience: 5
+scheduler_factor: 0.5
+scheduler_threshold: 0.001
+
+# SWA - disabled for fresh start
+swa_enabled: false
+
+# Noise - disabled
+noise_enabled: false
+
+# Early stopping - reasonable
+early_stopping_patience: 25
