@@ -8,7 +8,7 @@ depth: 4  # Keep at 4 for reasonable training time
 
 # Training parameters
 batch_size: 8  # Increased from 2 - 100GB GPU available for faster learning
-num_epochs: 300  # Extended training for convergence
+num_epochs: 500  # Extended to 500 for conservative plateau escape strategy
 learning_rate: 0.0002    # Increased from 0.0001 - scales with batch size
 weight_decay: 0.01  # Standard weight decay
 warmup_epochs: 5  # Gradual warmup to prevent instability
@@ -26,10 +26,10 @@ n_folds: 5
 # PROBLEM: variance_weight=0.3 was overwhelming Dice, causing model to ignore spatial structure
 # SOLUTION: Prioritize Dice for spatial learning, use minimal variance regularization
 loss_weights:
-  dice_weight: 0.7        # PRIMARY: Boosted to escape variance plateau - heavily prioritize spatial learning
-  focal_weight: 0.2       # Reduced slightly to make room for dice boost
-  variance_weight: 0.05   # HEAVILY REDUCED: variance loss was stuck at 0.98, now minimal constraint
-  boundary_weight: 0.05   # Edge detection
+  dice_weight: 0.75       # BOOSTED: Primary spatial learning signal (was 0.7)
+  focal_weight: 0.15      # REDUCED: Secondary background discrimination (was 0.2)
+  variance_weight: 0.1    # INCREASED: Restore regularization (was 0.05)
+  boundary_weight: 0.0    # DISABLED: Simplify - focus on core learning
   cldice_weight: 0.0      # DISABLED: Too complex, disabled for stability
   connectivity_weight: 0.0  # Keep disabled
 
@@ -43,11 +43,11 @@ background_weight: 2.94  # 1 / (1 - 0.66) for minority class
 foreground_weight: 1.52  # 1 / 0.66 for majority class
 
 # Learning rate scheduler
-scheduler_type: "cosine_warm_restarts"  # Options: "plateau" or "cosine_warm_restarts"
-scheduler_patience: 10  # Give time to learn before reducing LR (for plateau)
+scheduler_type: "plateau"  # Changed from cosine_warm_restarts to responsive plateau scheduler
+scheduler_patience: 5  # Reduce LR if no improvement for 5 epochs
 scheduler_factor: 0.5  # Standard reduction (for plateau)
-T_0: 10  # Initial cycle length for cosine warm restarts
-T_mult: 2  # Multiply cycle length after each restart
+T_0: 10  # Initial cycle length for cosine warm restarts (not used with plateau)
+T_mult: 2  # Multiply cycle length after each restart (not used with plateau)
 eta_min: 0.000001  # Minimum LR for cosine annealing
 grad_clip_norm: 0.5  # AGGRESSIVE gradient clipping to prevent explosion
 

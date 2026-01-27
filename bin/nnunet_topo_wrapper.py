@@ -596,10 +596,10 @@ class TopologyAwareTrainer:
         """
         import random
         
-        # Progressive aggressiveness: HIGHLY ESCALATING STRATEGY FOR VARIANCE PLATEAU ESCAPE
-        # plateau 1: multiplier = 1.5x, plateau 2: 2.35x, plateau 3: 3.2x, plateau 4: 5.05x
-        # MUCH more aggressive scaling to break out of variance loss plateaus
-        plateau_aggressiveness_multiplier = 1.5 + (total_plateau_count - 1) * 0.85
+        # Progressive aggressiveness: CONSERVATIVE ESCALATION STRATEGY
+        # plateau 1: multiplier = 1.0x, plateau 2: 1.15x, plateau 3: 1.3x, plateau 4: 1.45x
+        # Conservative scaling to escape plateaus while maintaining stability
+        plateau_aggressiveness_multiplier = 1.0 + (total_plateau_count - 1) * 0.15
         
         self.logger.warning(f"🔧 Applying adaptive intervention #{intervention_num + 1} (plateau #{total_plateau_count}, aggressiveness: {plateau_aggressiveness_multiplier:.1f}x)")
         
