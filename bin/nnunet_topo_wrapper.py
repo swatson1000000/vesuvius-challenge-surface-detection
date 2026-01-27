@@ -596,35 +596,34 @@ class TopologyAwareTrainer:
         """
         import random
         
-        # Progressive aggressiveness: CONSERVATIVE ESCALATION STRATEGY
-        # plateau 1: multiplier = 1.0x, plateau 2: 1.15x, plateau 3: 1.3x, plateau 4: 1.45x
-        # Conservative scaling to escape plateaus while maintaining stability
-        plateau_aggressiveness_multiplier = 1.0 + (total_plateau_count - 1) * 0.15
+        # FIX: Conservative LR scaling - max 5x to avoid destabilization
+        # Repeated failures indicate loss landscape problem, not LR problem
+        plateau_aggressiveness_multiplier = 1.0 + min(total_plateau_count - 1, 3) * 0.1  # Cap at 1.3x
         
         self.logger.warning(f"🔧 Applying adaptive intervention #{intervention_num + 1} (plateau #{total_plateau_count}, aggressiveness: {plateau_aggressiveness_multiplier:.1f}x)")
         
-        # Determine adaptive LR scaling based on gradient norms - MORE AGGRESSIVE
+        # Conservative LR scaling - small gradients often mean stuck local minimum, not underfitting
         if avg_gradient_norm is not None:
             if avg_gradient_norm < 0.01:
-                lr_scale = 35.0  # Very small gradients - extremely aggressive
-                self.logger.warning(f"→ Very small gradient norm ({avg_gradient_norm:.4f}) - extremely aggressive LR scaling")
+                lr_scale = 2.0  # Very small gradients - minimal boost (was 35x!)
+                self.logger.warning(f"→ Very small gradient norm ({avg_gradient_norm:.4f}) - conservative LR scaling (2x)")
             elif avg_gradient_norm < 0.1:
-                lr_scale = 25.0  # Small gradients - very aggressive boost
-                self.logger.warning(f"→ Small gradient norm ({avg_gradient_norm:.4f}) - very aggressive LR scaling")
+                lr_scale = 2.5  # Small gradients - slight boost (was 25x!)
+                self.logger.warning(f"→ Small gradient norm ({avg_gradient_norm:.4f}) - conservative LR scaling (2.5x)")
             elif avg_gradient_norm > 0.5:
-                lr_scale = 12.0   # Large gradients - strong boost
-                self.logger.warning(f"→ Large gradient norm ({avg_gradient_norm:.4f}) - strong LR scaling")
+                lr_scale = 2.0   # Large gradients - minimal boost
+                self.logger.warning(f"→ Large gradient norm ({avg_gradient_norm:.4f}) - conservative LR scaling (2x)")
             else:
-                lr_scale = 20.0   # Normal gradients - very strong boost
-                self.logger.warning(f"→ Normal gradient norm ({avg_gradient_norm:.4f}) - very strong LR scaling")
+                lr_scale = 2.0   # Normal gradients - minimal boost
+                self.logger.warning(f"→ Normal gradient norm ({avg_gradient_norm:.4f}) - conservative LR scaling (2x)")
         else:
-            # Fallback: use fixed scaling based on intervention number - INCREASED
-            lr_scales = [25.0, 20.0, 15.0]
+            # Fallback: small fixed scaling
+            lr_scales = [2.0, 1.5, 1.2]  # Reduced from [25.0, 20.0, 15.0]
             lr_scale = lr_scales[min(intervention_num, 2)]
         
-        # Apply progressive aggressiveness multiplier based on total plateaus
-        lr_scale = lr_scale * plateau_aggressiveness_multiplier
-        self.logger.warning(f"→ Progressive aggressiveness multiplier: {plateau_aggressiveness_multiplier:.1f}x → Final LR scale: {lr_scale:.1f}x")
+        # Cap total scaling to prevent runaway
+        lr_scale = min(lr_scale * plateau_aggressiveness_multiplier, 5.0)  # Absolute max 5x
+        self.logger.warning(f"→ Progressive aggressiveness multiplier: {plateau_aggressiveness_multiplier:.1f}x → Final LR scale: {lr_scale:.1f}x (capped at 5.0x)")
         
         if intervention_num == 0:
             # First intervention: Moderate LR increase + disable only connectivity loss

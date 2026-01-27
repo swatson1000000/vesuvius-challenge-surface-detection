@@ -15,7 +15,7 @@ warmup_epochs: 5  # Gradual warmup to prevent instability
 
 # Data parameters
 patch_size: [128, 128, 128]
-num_workers: 4
+num_workers: 1  # Reduced from 4 to avoid process explosion and GPU contention
 
 # Cross-validation
 n_folds: 5
