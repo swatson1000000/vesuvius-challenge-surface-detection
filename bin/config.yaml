@@ -26,9 +26,9 @@ n_folds: 5
 # PROBLEM: variance_weight=0.3 was overwhelming Dice, causing model to ignore spatial structure
 # SOLUTION: Prioritize Dice for spatial learning, use minimal variance regularization
 loss_weights:
-  dice_weight: 0.5        # PRIMARY: Dice coefficient drives spatial feature learning
-  focal_weight: 0.3       # Secondary: Focus on hard examples
-  variance_weight: 0.1    # Minimal regularization - not dominant term
+  dice_weight: 0.7        # PRIMARY: Boosted to escape variance plateau - heavily prioritize spatial learning
+  focal_weight: 0.2       # Reduced slightly to make room for dice boost
+  variance_weight: 0.05   # HEAVILY REDUCED: variance loss was stuck at 0.98, now minimal constraint
   boundary_weight: 0.05   # Edge detection
   cldice_weight: 0.0      # DISABLED: Too complex, disabled for stability
   connectivity_weight: 0.0  # Keep disabled

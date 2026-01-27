@@ -700,3 +700,136 @@ nvidia-smi
 
 This optimization is a **pure win** for training speed with zero quality tradeoff!
 
+
+---
+
+# Critical Update: Aggressive Plateau Escape Strategy - January 26, 2026 19:50 UTC
+
+## Plateau Detection
+
+**Training Status:** Fold 0 OPTIMIZED run reached plateau at epoch 22
+- **Best epoch:** 18 (Val Loss: 0.5561)
+- **Current epoch:** 22 (Val Loss: 0.5696 - degrading)
+- **Consecutive degradation:** 3+ epochs triggering recovery
+
+**Root Cause of Plateau:**
+- Variance loss component STUCK at 0.9876-0.9999 (not improving)
+- Model maxed out on variance regularization - can't improve without escaping this constraint
+- Adaptive interventions (multiplier: 2.2x) insufficient to break plateau
+
+## Aggressive Escape Strategy Implemented
+
+### Change 1: Hyperaggressive Adaptive Intervention Scaling
+
+**OLD Formula:**
+```
+multiplier = 1.0 + (plateau_count - 1) × 0.3
+```
+- Plateau 1: 1.0x
+- Plateau 5: 2.2x
+- Result: 55x LR scaling (insufficient)
+
+**NEW Formula:**
+```
+multiplier = 1.5 + (plateau_count - 1) × 0.85
+```
+- Plateau 1: 1.5x
+- Plateau 5: **5.05x** (vs 2.2x before)
+- **Next intervention LR scale: 122x** (vs 55x)
+- Increase factor: **2.2x more aggressive**
+
+### Change 2: Aggressive Loss Weight Rebalancing
+
+Reduced variance constraint weight by 50% to allow model to escape variance plateau:
+
+| Component | OLD | NEW | Change | Rationale |
+|-----------|-----|-----|--------|-----------|
+| **dice_weight** | 0.5 | **0.7** | +40% | Aggressively prioritize spatial learning |
+| **focal_weight** | 0.3 | 0.2 | -33% | Make room for dice dominance |
+| **variance_weight** | **0.1** | **0.05** | **-50%** | **HALF the constraint** - variance stuck at 0.98 |
+| **boundary_weight** | 0.05 | 0.05 | (same) | Keep surface quality |
+
+**New Loss Composition:**
+- Dice: **70%** (dominant) - forces spatial structure learning
+- Focal: **20%** - background discrimination  
+- Variance: **5%** (minimal) - regularization only, not blocking signal
+- Boundary: **5%** - surface quality
+
+**Why This Works:**
+- Old variance weight (0.1) was 50% of total (0.2) → too heavy when stuck
+- New variance weight (0.05) is only 5% of total (1.0) → model can ignore it if needed
+- Dice boost (0.7) provides strong spatial learning signal
+- Variance loss can degrade to 0.5 (instead of stuck at 0.98) without blocking convergence
+
+### Files Modified
+
+1. **`bin/nnunet_topo_wrapper.py`** (line 602)
+   - Updated plateau aggressiveness multiplier formula
+   - Effect: Next LR scaling intervention will be 122x instead of 55x
+
+2. **`bin/config.yaml`** (loss_weights section)
+   - Dice: 0.5 → 0.7
+   - Focal: 0.3 → 0.2
+   - Variance: 0.1 → 0.05
+   - Effect: Loss constraints relaxed, dice dominance strengthened
+
+### Expected Results
+
+**Scenario A: Escape Successful** (60% probability)
+- LR boost + reduced variance constraint breaks plateau
+- Model learns real spatial structure
+- Val loss improves to <0.50 range
+- Foreground ratio variance increases (no longer uniform)
+
+**Scenario B: Oscillation Pattern** (30% probability)
+- Model oscillates around current plateau
+- Loss doesn't improve but doesn't diverge
+- Indicates hard local minimum - may need further adjustments
+
+**Scenario C: Divergence** (10% probability)
+- Loss increases > 1.0 with aggressive LR
+- Model diverges from optimization
+- Action: Rollback, reduce aggressiveness multiplier
+
+### Monitoring Instructions
+
+```bash
+# Watch for plateau escape
+grep "Epoch.*Val - Loss\|Adaptive intervention" log/train_OPTIMIZED_*.log | tail -30
+
+# Key metrics to watch:
+# 1. Variance loss component: Should drop from 0.98 → ideally <0.5
+# 2. Overall val loss: Should break below 0.5561 (plateau point)
+# 3. LR scaling magnitude: Should see 122x+ if another plateau triggers
+# 4. Foreground ratios: Should show VARIATION across images (not uniform)
+```
+
+### Justification for Aggressiveness
+
+1. **Variance plateau is real blocker:** At 0.9876-0.9999, model literally cannot improve without leaving this local minimum
+
+2. **Dice boost is mathematically sound:** Spatial overlap (Dice) is the PRIMARY learning signal for segmentation - should dominate
+
+3. **5x multiplier escalation justified:** 
+   - Standard interventions (1.0x multiplier) weren't working
+   - Previous max (2.2x) insufficient after 5 plateaus
+   - 5.05x still conservative vs 10-50x used in some aggressive RL algorithms
+
+4. **Variance weight reduction is safe:**
+   - Variance still present (0.05 weight) for regularization
+   - Not zero - still constrains model
+   - Only removes excessive dominance that caused plateau
+
+### Fallback Plan
+
+If model diverges or oscillation continues:
+1. Reduce plateau_aggressiveness_multiplier back to `1.2 + (p-1) × 0.5` (intermediate)
+2. Increase variance_weight back to 0.08
+3. Run for 10 more epochs to assess
+
+If successful plateau escape:
+1. Continue to convergence (~300 epochs)
+2. Monitor variance component: if it drops to <0.3, success
+3. Run inference to validate varied foreground ratios (not uniform)
+
+---
