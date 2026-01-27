@@ -7,9 +7,9 @@ initial_filters: 32  # Increased from 16 - larger model for better capacity
 depth: 4  # Keep at 4 for reasonable training time
 
 # Training parameters
-batch_size: 8  # Increased from 2 - 100GB GPU available for faster learning
+batch_size: 12  # Increased from 8 - using ~90GB of 100GB available GPU
 num_epochs: 500  # Extended to 500 for conservative plateau escape strategy
-learning_rate: 0.0002    # Increased from 0.0001 - scales with batch size
+learning_rate: 0.000245    # Scaled with batch size: 0.0002 × sqrt(1.5) = 0.000245
 weight_decay: 0.01  # Standard weight decay
 warmup_epochs: 5  # Gradual warmup to prevent instability
 
