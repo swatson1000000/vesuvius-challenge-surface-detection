@@ -1263,3 +1263,47 @@ total_weight: 1.0          # Balanced
 - Configuration verified
 - Batch size increased (79 batches per epoch vs 157)
 - Monitoring for breakthrough past epoch 5
+
+### v8_dice_only (Jan 27, 2026, Diagnostic)
+**Hypothesis Test:** Is plateau caused by loss function design or fundamental issue?
+
+**Pure Dice Configuration (No Competing Objectives):**
+```yaml
+dice_weight: 1.0           # ONLY Dice loss
+focal_weight: 0.0          # Disabled
+variance_weight: 0.0       # Disabled
+boundary_weight: 0.0       # Disabled
+cldice_weight: 0.0         # Disabled
+connectivity_weight: 0.0   # Disabled
+batch_size: 8              # Same as v7
+learning_rate: 0.0005      # Same as v7
+```
+
+**Test Design:**
+- **Result A (Improving):** If v8 shows continuous improvement past epoch 5 and breaks v7's 0.5831 barrier
+  - **Verdict:** ✅ Problem IS loss tuning - can be fixed
+  - **Next Step:** Refine loss weights empirically (return to v7 framework, adjust variance 0.05-0.02)
+
+- **Result B (Plateaus Again):** If v8 stalls with same oscillation pattern around epoch 6-10
+  - **Verdict:** ❌ Problem is NOT loss tuning - fundamental issue
+  - **Next Step:** Need different approach (bigger model, smaller patches, data augmentation, etc.)
+
+**Epoch Progress:**
+| Epoch | Val Loss | Best? | Notes |
+|-------|----------|-------|-------|
+| 0 | 0.6673 | ✅ | Baseline with warmup |
+| 1 | 0.6686 | ❌ | Minor dip after warmup |
+| 2 | 0.6613 | ✅ | Improving |
+| 3 | 0.6480 | ✅ | Stronger improvement |
+| 4 | 0.6472 | ✅ | **BEST** - 2.9% better than v6 |
+| 5 | 0.6689 | ❌ | Degradation starts |
+| 6 | 0.6663 | ❌ | Still degrading (scheduler patience 2/3) |
+
+**Critical Observation:** v8 IS improving! Epochs 0-4 show steady descent from 0.6673 → 0.6472.
+- This breaks v7's plateau pattern (which got stuck at 0.5831)
+- Suggests Dice-only signal allows learning
+- Scheduler triggering at epoch 5 may need tuning, but fundamental learning capability is proven
+
+**Status:** Training started 2026-01-27 21:20:47
+- Running 5-fold cross-validation (fold 0 active)
+- Monitoring through epoch 15+ to determine verdict (A or B)
