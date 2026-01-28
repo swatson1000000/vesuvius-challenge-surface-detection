@@ -1,8 +1,0 @@
-📄 Reading: /home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/log/train_20260125_165457.log
-📊 Status: TRAINING
-📈 Current Epoch: 12
-✨ Best Val Loss: 0.560200 @ Epoch 9
-📧 Sending via Gmail SMTP...
-✅ Email sent via Gmail SMTP to swatson1000000@gmail.com
-✅ Status logged to monitor_status.txt
-✅ Monitoring check complete

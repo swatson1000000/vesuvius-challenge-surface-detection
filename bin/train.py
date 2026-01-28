@@ -316,6 +316,21 @@ def train_single_fold(fold: int, config: dict, data_dir: Path, device: torch.dev
     logger.info(f"Starting training for fold {fold}...")
     sys.stdout.flush()
     
+    # Setup progressive loss schedule if configured
+    progressive_schedule = None
+    if config.get('progressive_loss_schedule', False):
+        progressive_schedule = config.get('progressive_phases', [])
+        if progressive_schedule:
+            trainer.progressive_schedule = progressive_schedule
+            logger.info(f"Progressive loss scheduling enabled with {len(progressive_schedule)} phases")
+            for phase in progressive_schedule:
+                logger.info(
+                    f"  Phase {phase['phase']} (Epochs {phase['epoch_start']}-{phase['epoch_end']}): "
+                    f"Dice={phase['loss_weights']['dice_weight']:.2f}, "
+                    f"Focal={phase['loss_weights']['focal_weight']:.2f}, "
+                    f"Variance={phase['loss_weights']['variance_weight']:.2f}"
+                )
+    
     # Pass SWA and noise config to trainer
     trainer_config = {
         'swa_model': swa_model,

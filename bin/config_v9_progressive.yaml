@@ -1,0 +1,107 @@
+# Configuration for Topology-Aware nnU-Net Training - v9_progressive
+# Strategy: Progressive loss scheduling to break plateau
+# Phase 1 (Epochs 0-30): Pure Dice - establish spatial learning baseline
+# Phase 2 (Epochs 31-60): Add focal loss gradually - hard negative mining
+# Phase 3 (Epochs 61-300): Full loss ensemble - balanced optimization
+
+# Model architecture
+in_channels: 1
+out_channels: 1
+initial_filters: 32
+depth: 4
+
+# Training parameters
+batch_size: 8              # Larger batches for stable gradients
+num_epochs: 300            # Extended for full convergence
+learning_rate: 0.0005      # Moderate (2x v8 baseline for exploration)
+weight_decay: 0.0001       # Conservative regularization
+warmup_epochs: 2           # Minimal warmup
+
+# Data parameters
+patch_size: [128, 128, 128]
+num_workers: 4
+
+# Cross-validation
+n_folds: 5
+
+# Progressive Loss Schedule
+# Loss weights transition over training to prevent conflicting objectives
+progressive_loss_schedule: true
+progressive_phases:
+  # Phase 1: Pure Dice (Epochs 0-30)
+  # Goal: Establish solid spatial structure learning without confusion
+  # Why: Dice measures overlap quality directly (primary goal)
+  - phase: 1
+    epoch_start: 0
+    epoch_end: 30
+    loss_weights:
+      dice_weight: 1.0       # DOMINANT: Focus on overlap
+      focal_weight: 0.0      # OFF: No hard negative mining yet
+      variance_weight: 0.0   # OFF: Let model be confident
+      boundary_weight: 0.0   # OFF: Simple objective
+      cldice_weight: 0.0
+      connectivity_weight: 0.0
+    target: "Break initial plateau with clear signal"
+
+  # Phase 2: Dice + Focal (Epochs 31-60)
+  # Goal: Introduce hard negative mining gradually
+  # Why: After learning basic structure, refine with hard negative focus
+  - phase: 2
+    epoch_start: 31
+    epoch_end: 60
+    loss_weights:
+      dice_weight: 0.8       # Maintain primary objective
+      focal_weight: 0.2      # GRADUAL: Add hard negatives (10% strength)
+      variance_weight: 0.0   # OFF: Still confident
+      boundary_weight: 0.0   # OFF: Not needed yet
+      cldice_weight: 0.0
+      connectivity_weight: 0.0
+    target: "Refine predictions with soft hard-negative mining"
+
+  # Phase 3: Full Ensemble (Epochs 61-300)
+  # Goal: Balanced multi-objective optimization
+  # Why: Model has learned fundamentals, now balance all constraints
+  - phase: 3
+    epoch_start: 61
+    epoch_end: 300
+    loss_weights:
+      dice_weight: 0.75      # PRIMARY: Spatial overlap
+      focal_weight: 0.15     # Secondary: Hard negatives
+      variance_weight: 0.05  # Tertiary: Gentle uncertainty penalty
+      boundary_weight: 0.05  # Tertiary: Surface quality
+      cldice_weight: 0.0     # Disabled
+      connectivity_weight: 0.0
+    target: "Converge to balanced solution"
+
+# Focal loss parameters
+focal_gamma: 2.0
+focal_alpha: 0.4
+
+# Class weights - BALANCED
+use_class_weights: false  # Let loss weights handle balance
+background_weight: 1.0
+foreground_weight: 1.5
+
+# Learning rate scheduler
+scheduler_type: "plateau"
+scheduler_patience: 8      # More patience for phase transitions
+scheduler_factor: 0.5
+scheduler_threshold: 0.0005
+
+# SWA - enabled for final convergence
+swa_enabled: true
+swa_start_epoch: 80        # Start after phase transition settles
+
+# Noise - minimal (only for diversity)
+noise_enabled: true
+noise_start_epoch: 50      # After phase 1 completes
+noise_frequency: 10
+noise_std: 0.001
+
+# Early stopping - reasonable
+early_stopping_patience: 40
+
+# Adaptive interventions for plateau recovery
+adaptive_interventions_enabled: true
+adaptive_intervention_patience: 3        # Trigger after 3 degrading epochs
+adaptive_intervention_lr_multiplier: 1.2 # Conservative: 20% LR boost per trigger

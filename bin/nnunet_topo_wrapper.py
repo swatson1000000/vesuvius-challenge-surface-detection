@@ -145,6 +145,54 @@ class TopologyAwareTrainer:
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
         
+        # Progressive loss scheduling
+        self.progressive_schedule = None  # Will be set by train() method
+        
+    def update_loss_weights_for_epoch(self, epoch: int):
+        """
+        Update loss weights based on progressive schedule.
+        Called at the start of each epoch.
+        
+        Args:
+            epoch: Current epoch number (0-indexed)
+        """
+        if not self.progressive_schedule:
+            return  # No progressive scheduling
+        
+        # Find which phase we're in
+        current_phase = None
+        for phase_info in self.progressive_schedule:
+            if phase_info['epoch_start'] <= epoch <= phase_info['epoch_end']:
+                current_phase = phase_info
+                break
+        
+        if current_phase and hasattr(self.criterion, 'dice_weight'):
+            weights = current_phase['loss_weights']
+            
+            # Update loss weights
+            self.criterion.dice_weight = weights.get('dice_weight', 1.0)
+            self.criterion.focal_weight = weights.get('focal_weight', 0.0)
+            self.criterion.variance_weight = weights.get('variance_weight', 0.0)
+            self.criterion.boundary_weight = weights.get('boundary_weight', 0.0)
+            self.criterion.cldice_weight = weights.get('cldice_weight', 0.0)
+            self.criterion.connectivity_weight = weights.get('connectivity_weight', 0.0)
+            
+            # Log when entering new phase
+            if epoch > 0:
+                prev_phase = None
+                for phase_info in self.progressive_schedule:
+                    if phase_info['epoch_start'] <= (epoch - 1) <= phase_info['epoch_end']:
+                        prev_phase = phase_info
+                        break
+                
+                if prev_phase and prev_phase != current_phase:
+                    phase_num = current_phase.get('phase', '?')
+                    self.logger.info(
+                        f"Epoch {epoch}: Transitioning to Phase {phase_num} - "
+                        f"Dice:{self.criterion.dice_weight:.3f}, Focal:{self.criterion.focal_weight:.3f}, "
+                        f"Variance:{self.criterion.variance_weight:.3f}, Boundary:{self.criterion.boundary_weight:.3f}"
+                    )
+        
     def train_epoch(self, train_loader) -> Dict[str, float]:
         """Train for one epoch"""
         self.model.train()
@@ -340,6 +388,9 @@ class TopologyAwareTrainer:
                 for param_group in self.optimizer.param_groups:
                     param_group['lr'] = self.base_lr
                 self.logger.info(f"Warmup complete. LR reset to: {self.base_lr:.6f}")
+            
+            # Update loss weights for progressive scheduling
+            self.update_loss_weights_for_epoch(epoch)
             
             # Apply weight noise injection (Phase 3 - Constrained Exploration)
             if noise_enabled and epoch >= noise_start_epoch and epoch % noise_frequency == 0:

@@ -1,0 +1,58 @@
+# Configuration for Topology-Aware nnU-Net Training - v8_dice_only
+# Target: SIMPLIFY loss function to identify root cause
+# Strategy: Remove ALL conflicting signals - pure Dice optimization
+
+# Model architecture
+in_channels: 1
+out_channels: 1
+initial_filters: 32
+depth: 4
+
+# Training parameters
+batch_size: 8              # Keep larger batches (stable)
+num_epochs: 100
+learning_rate: 0.0005      # INCREASED: 0.001 → 0.0005 for exploration
+weight_decay: 0.0001       # Conservative regularization
+warmup_epochs: 2           # Minimal warmup
+
+# Data parameters
+patch_size: [128, 128, 128]
+num_workers: 4
+
+# Cross-validation
+n_folds: 5
+
+# Loss weights - DICE ONLY (SIMPLEST POSSIBLE)
+# If this still plateaus, problem is NOT loss function design
+# Problem would be: architecture, data, patch size, or fundamental optimization landscape
+loss_weights:
+  dice_weight: 1.0        # ONLY objective
+  focal_weight: 0.0       # DISABLED - remove hard negative obsession
+  variance_weight: 0.0    # DISABLED - remove uncertainty forcing
+  boundary_weight: 0.0    # DISABLED - remove topology complexity
+  cldice_weight: 0.0      # DISABLED
+  connectivity_weight: 0.0
+
+# Focal loss parameters (ignored)
+focal_gamma: 2.0
+focal_alpha: 0.35
+
+# Class weights - BALANCED
+use_class_weights: false  # Disable class weighting - let raw Dice work
+background_weight: 1.0
+foreground_weight: 1.5
+
+# Learning rate scheduler
+scheduler_type: "plateau"
+scheduler_patience: 5
+scheduler_factor: 0.5
+scheduler_threshold: 0.001
+
+# SWA - disabled
+swa_enabled: false
+
+# Noise - disabled
+noise_enabled: false
+
+# Early stopping - reasonable
+early_stopping_patience: 25
