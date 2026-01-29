@@ -12,5 +12,5 @@ export GMAIL_APP_PASSWORD="vlgnlhkifapctzjg"
 # Go to project directory
 cd /home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection
 
-# Run monitor script with proper Python path, reading log from /tmp
-/home/swatson/miniconda3/envs/phi4/bin/python3 monitor_training.py --log-file /tmp/train_v9_progressive.log >> log/monitor_cron.log 2>&1
+# Run monitor script with proper Python path, reading log from the log directory
+/home/swatson/miniconda3/envs/phi4/bin/python3 monitor_training.py --log-file log/train_v9_progressive.log >> log/monitor_cron.log 2>&1
