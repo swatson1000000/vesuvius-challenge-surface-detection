@@ -213,12 +213,16 @@ class TopologyAwareTrainer:
             images = batch['image'].to(self.device)
             labels = batch['label'].to(self.device)
             
+            # Convert 3-class labels to binary for loss computation
+            # Values 1 and 2 are both foreground (surface), 0 is background
+            labels_binary = (labels > 0).float()
+            
             # Forward pass
             self.optimizer.zero_grad()
             outputs = self.model(images)
             
-            # Compute loss
-            loss, loss_components = self.criterion(outputs, labels)
+            # Compute loss using binary labels
+            loss, loss_components = self.criterion(outputs, labels_binary)
             
             # Backward pass
             loss.backward()
@@ -276,11 +280,14 @@ class TopologyAwareTrainer:
                 images = batch['image'].to(self.device)
                 labels = batch['label'].to(self.device)
                 
+                # Convert 3-class labels to binary for loss computation
+                labels_binary = (labels > 0).float()
+                
                 # Forward pass
                 outputs = self.model(images)
                 
-                # Compute loss
-                loss, loss_components = self.criterion(outputs, labels)
+                # Compute loss using binary labels
+                loss, loss_components = self.criterion(outputs, labels_binary)
                 
                 # Log losses
                 for key, value in loss_components.items():

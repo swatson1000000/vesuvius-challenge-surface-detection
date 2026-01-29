@@ -60,8 +60,8 @@ class VesuviusDataset(Dataset):
         # Normalize image
         image = self._normalize(image)
         
-        # Ensure binary label
-        label = (label > 0).astype(np.float32)
+        # Keep 3-class label (0=background, 1=surface type 1, 2=surface type 2)
+        label = label.astype(np.float32)
         
         # Extract patch if needed
         if image.shape != self.patch_size:
@@ -269,7 +269,7 @@ def train_single_fold(fold: int, config: dict, data_dir: Path, device: torch.dev
     # Create model and trainer
     model_config = {
         'in_channels': 1,
-        'out_channels': 1,
+        'out_channels': 1,  # Will output soft probabilities, then apply softmax to 3 classes
         'initial_filters': config.get('initial_filters', 32),
         'depth': config.get('depth', 5),
         'learning_rate': config.get('learning_rate', 1e-3),

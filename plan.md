@@ -2,6 +2,72 @@
 
 ---
 
+# 🔍 CRITICAL DISCOVERY: 3-CLASS LABEL STRUCTURE (January 29, 2026)
+
+## Data Analysis Findings
+
+### Label Format Investigation
+After analyzing inference producing 99.88% foreground (vs expected <1%), investigated label structure:
+
+**Discovery:** Training labels contain **3 classes, not binary!**
+- **Value 0:** Background (24.63% in sample file)
+- **Value 1:** Surface Type 1 (~5% average across all 786 files)
+- **Value 2:** Surface Type 2 (~56% average across all 786 files)
+- **Combined Foreground:** ~61% average (range 11-95%)
+
+### Complete Label Distribution (All 786 Training Files)
+
+| Metric | Value 1 | Value 2 | Combined (1+2) |
+|--------|---------|---------|----------------|
+| Mean | 5.28% | 55.62% | 60.89% |
+| Median | 4.91% | 58.94% | 64.05% |
+| Min | 0.87% | 5.52% | 11.18% |
+| Max | 17.39% | 93.62% | 94.80% |
+| Std Dev | 2.31% | 21.21% | 19.60% |
+| Files with both values | **786/786** (100%) | - | - |
+
+**Key Insight:** ALL 786 files contain BOTH value 1 and value 2. They are always present together, suggesting:
+- Value 1: Secondary/confidence surface annotation (~5% consistent)
+- Value 2: Primary surface structure (highly variable ~56%)
+
+### Previous Issue: Binary Collapse
+The training script was collapsing both values 1 and 2 to binary foreground:
+```python
+label = (label > 0).astype(np.float32)  # Discards class information!
+```
+
+**Problem:** Lost critical distinction between surface types 1 and 2
+- Model couldn't learn the class-specific patterns
+- Training target: ~61% foreground (too high for thin papyrus surfaces)
+- Inference output: 99.88% foreground (model over-confident)
+
+### Solution: Preserve 3-Class Structure
+
+**Changes Made:**
+1. **train.py:** Modified label loading to preserve values 0, 1, 2
+   ```python
+   label = label.astype(np.float32)  # Keep all 3 values
+   ```
+
+2. **nnunet_topo_wrapper.py:** Convert 3-class to binary only for loss computation
+   ```python
+   labels_binary = (labels > 0).float()  # Convert only during loss
+   ```
+
+**Benefits:**
+- Model sees full label structure during patch extraction and augmentation
+- Preserves spatial relationships between surface types
+- Allows learning surface-specific features
+- Loss function remains compatible (binary for existing losses)
+
+### Next Steps
+- Train new model with 3-class labels preserved
+- Monitor if model learns to distinguish between Value 1 and Value 2
+- Compare inference predictions against 3-class ground truth
+- Evaluate if separate surface types improve competition metrics
+
+---
+
 # 🎯 V9 PROGRESSIVE LOSS SCHEDULING - BREAKTHROUGH ACHIEVED! (January 28, 2026 17:38 UTC)
 
 ## Status: ✅ BEST CONFIGURATION FOUND
