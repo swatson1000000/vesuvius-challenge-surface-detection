@@ -33,6 +33,12 @@ def get_latest_log(custom_log_file=None):
     if custom_log_file and os.path.exists(custom_log_file):
         return custom_log_file
     
+    # First, try to read from train_v9_progressive.log (current training)
+    primary_log = os.path.join(LOG_DIR, "train_v9_progressive.log")
+    if os.path.exists(primary_log):
+        return primary_log
+    
+    # Fallback: search for other training logs sorted by creation time
     log_files = glob.glob(os.path.join(LOG_DIR, "train_*.log"))
     if not log_files:
         return None
