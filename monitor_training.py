@@ -12,6 +12,7 @@ import json
 import base64
 import sys
 import time
+import argparse
 from datetime import datetime
 from pathlib import Path
 
@@ -26,8 +27,12 @@ SENDER_EMAIL = "swatson1000000@gmail.com"
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")  # Set via .monitor_env
 
-def get_latest_log():
+def get_latest_log(custom_log_file=None):
     """Get the latest training log file"""
+    # If custom log file specified, use it if it exists
+    if custom_log_file and os.path.exists(custom_log_file):
+        return custom_log_file
+    
     log_files = glob.glob(os.path.join(LOG_DIR, "train_*.log"))
     if not log_files:
         return None
@@ -179,10 +184,16 @@ RECENT LOG LINES
 
 def main():
     """Main monitoring function - runs once and exits (designed for cron scheduling)"""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Training monitor')
+    parser.add_argument('--log-file', type=str, default=None, 
+                        help='Path to training log file (default: search in LOG_DIR)')
+    args = parser.parse_args()
+    
     print(f"📊 Training Monitor - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}")
     
-    log_file = get_latest_log()
+    log_file = get_latest_log(custom_log_file=args.log_file)
     
     if not log_file:
         print("❌ No training log found")

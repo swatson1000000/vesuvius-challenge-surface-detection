@@ -12,7 +12,7 @@ depth: 4
 
 # Training parameters
 batch_size: 8              # Larger batches for stable gradients
-num_epochs: 300            # Extended for full convergence
+num_epochs: 50             # Reduced for faster iteration (SWA at epoch 30)
 learning_rate: 0.0005      # Moderate (2x v8 baseline for exploration)
 weight_decay: 0.0001       # Conservative regularization
 warmup_epochs: 2           # Minimal warmup
@@ -43,35 +43,40 @@ progressive_phases:
       connectivity_weight: 0.0
     target: "Break initial plateau with clear signal"
 
-  # Phase 2: Dice + Focal (Epochs 31-60)
-  # Goal: Introduce hard negative mining gradually
-  # Why: After learning basic structure, refine with hard negative focus
+  # Phase 2: Dice + Minimal Focal (Epochs 31-39)
+  # Goal: Introduce hard negative mining VERY GRADUALLY
+  # Why: After learning basic structure, add weak hard negative focus
+  # UPDATED: Focal reduced to 0.05 to prevent catastrophic loss spikes
   - phase: 2
     epoch_start: 31
-    epoch_end: 60
+    epoch_end: 39
     loss_weights:
-      dice_weight: 0.8       # Maintain primary objective
-      focal_weight: 0.2      # GRADUAL: Add hard negatives (10% strength)
+      dice_weight: 0.95      # Maintain primary objective strongly
+      focal_weight: 0.05     # VERY GRADUAL: Add hard negatives (only 5% - half strength)
       variance_weight: 0.0   # OFF: Still confident
       boundary_weight: 0.0   # OFF: Not needed yet
       cldice_weight: 0.0
       connectivity_weight: 0.0
-    target: "Refine predictions with soft hard-negative mining"
+    target: "Gentle introduction of hard-negative mining"
 
   # Phase 3: Full Ensemble (Epochs 61-300)
   # Goal: Balanced multi-objective optimization
   # Why: Model has learned fundamentals, now balance all constraints
+  # Phase 3: Balanced Ensemble (Epochs 40-50)
+  # Goal: Smooth transition to full multi-objective learning
+  # Why: Model has learned fundamentals, now balance all constraints
+  # UPDATED: Start with gradual weights, build up focal to 0.10 (instead of 0.15)
   - phase: 3
-    epoch_start: 61
-    epoch_end: 300
+    epoch_start: 40
+    epoch_end: 50
     loss_weights:
-      dice_weight: 0.75      # PRIMARY: Spatial overlap
-      focal_weight: 0.15     # Secondary: Hard negatives
-      variance_weight: 0.05  # Tertiary: Gentle uncertainty penalty
-      boundary_weight: 0.05  # Tertiary: Surface quality
+      dice_weight: 0.85      # PRIMARY: Keep spatial overlap strong
+      focal_weight: 0.10     # Secondary: Hard negatives (doubled from Phase 2)
+      variance_weight: 0.03  # Tertiary: Gentle uncertainty penalty
+      boundary_weight: 0.02  # Tertiary: Light surface quality
       cldice_weight: 0.0     # Disabled
       connectivity_weight: 0.0
-    target: "Converge to balanced solution"
+    target: "Converge to balanced solution with stable objectives"
 
 # Focal loss parameters
 focal_gamma: 2.0
@@ -90,7 +95,7 @@ scheduler_threshold: 0.0005
 
 # SWA - enabled for final convergence
 swa_enabled: true
-swa_start_epoch: 80        # Start after phase transition settles
+swa_start_epoch: 30        # Start at epoch 30 (halfway through training)
 
 # Noise - minimal (only for diversity)
 noise_enabled: true
