@@ -6,11 +6,16 @@
 eval "$(conda shell.bash hook)"
 conda activate phi4
 
-# Export Gmail password for email sending
-export GMAIL_APP_PASSWORD="vlgnlhkifapctzjg"
+# Load Gmail password from secure environment file
+if [ -f .monitor_env ]; then
+    source .monitor_env
+else
+    echo "⚠️ Warning: .monitor_env not found. Email sending will be disabled."
+fi
 
 # Go to project directory
 cd /home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection
 
-# Run monitor script with proper Python path, reading log from the log directory
-/home/swatson/miniconda3/envs/phi4/bin/python3 monitor_training.py --log-file log/train_v9_progressive.log >> log/monitor_cron.log 2>&1
+# Run monitor script (auto-detects latest training log)
+# Searches in priority order: train_value1_*.log, train_3class_*.log, train_v9_progressive.log, train_*.log
+/home/swatson/miniconda3/envs/phi4/bin/python3 monitor_training.py >> log/monitor_cron.log 2>&1

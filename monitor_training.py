@@ -33,16 +33,26 @@ def get_latest_log(custom_log_file=None):
     if custom_log_file and os.path.exists(custom_log_file):
         return custom_log_file
     
-    # First, try to read from train_v9_progressive.log (current training)
-    primary_log = os.path.join(LOG_DIR, "train_v9_progressive.log")
-    if os.path.exists(primary_log):
-        return primary_log
+    # Search for training logs in order of priority:
+    # 1. train_value1_*.log (current Value 1 only training)
+    # 2. train_3class_*.log (3-class training)
+    # 3. train_v9_progressive.log (legacy)
+    # 4. Any other train_*.log
     
-    # Fallback: search for other training logs sorted by creation time
-    log_files = glob.glob(os.path.join(LOG_DIR, "train_*.log"))
-    if not log_files:
-        return None
-    return max(log_files, key=os.path.getctime)
+    log_patterns = [
+        os.path.join(LOG_DIR, "train_value1_*.log"),
+        os.path.join(LOG_DIR, "train_3class_*.log"),
+        os.path.join(LOG_DIR, "train_v9_progressive.log"),
+        os.path.join(LOG_DIR, "train_*.log")
+    ]
+    
+    for pattern in log_patterns:
+        log_files = glob.glob(pattern)
+        if log_files:
+            # Return the most recently created file
+            return max(log_files, key=os.path.getctime)
+    
+    return None
 
 def parse_training_status(log_file):
     """Parse training log and extract current metrics"""
@@ -58,50 +68,65 @@ def parse_training_status(log_file):
         "latest_epoch": None,
         "best_val_loss": None,
         "best_epoch": None,
-        "status": "Unknown"
+        "status": "Unknown",
+        "total_epochs_completed": 0
     }
     
     try:
         with open(log_file, 'r') as f:
             content = f.read()
         
-        # Extract epoch information
-        epoch_pattern = r'Epoch (\d+).*?(?:Val - Loss: ([\d.]+))?'
-        matches = re.findall(epoch_pattern, content)
+        # Extract validation loss information (format: "Epoch N Val - Loss: X.XXXX")
+        val_loss_pattern = r'Epoch (\d+).*?Val - Loss: ([\d.]+)'
+        val_matches = re.findall(val_loss_pattern, content)
         
-        if matches:
+        if val_matches:
+            status["total_epochs_completed"] = len(val_matches)
+            status["val_losses"] = [(int(e), float(v)) for e, v in val_matches]
+            
             # Get latest epoch
-            latest = matches[-1]
+            latest = val_matches[-1]
             status["latest_epoch"] = int(latest[0])
             
-            # Extract validation losses
-            val_loss_pattern = r'Epoch (\d+).*?Val - Loss: ([\d.]+)'
-            val_matches = re.findall(val_loss_pattern, content)
-            
-            if val_matches:
-                status["val_losses"] = [(int(e), float(v)) for e, v in val_matches]
-                vals = [v for e, v in val_matches]
-                if vals:
-                    status["best_val_loss"] = min(vals)
-                else:
-                    status["best_val_loss"] = None
+            # Find best validation loss
+            vals = [float(v) for e, v in val_matches]
+            if vals:
+                status["best_val_loss"] = min(vals)
                 # Find epoch with best val loss
-                if status["best_val_loss"] is not None:
-                    best_idx = min(range(len(status["val_losses"])), 
-                                 key=lambda i: status["val_losses"][i][1])
-                    status["best_epoch"] = status["val_losses"][best_idx][0]
+                best_idx = min(range(len(status["val_losses"])), 
+                             key=lambda i: status["val_losses"][i][1])
+                status["best_epoch"] = status["val_losses"][best_idx][0]
         
-        # Check if training is still running
+        # Check if training is still running or completed
         if "completed" in content.lower() or "finished" in content.lower():
             status["status"] = "COMPLETED"
-        elif status["latest_epoch"] is not None:
-            status["status"] = "TRAINING"
+        elif "Training started" in content or "STARTING FOLD" in content:
+            if status["latest_epoch"] is not None:
+                status["status"] = "TRAINING IN PROGRESS"
+            else:
+                status["status"] = "INITIALIZING"
+        elif "SUSTAINED DEGRADATION" in content or "DEGRADATION" in content:
+            status["status"] = "DEGRADATION CYCLE"
         else:
-            status["status"] = "INITIALIZING"
+            if status["latest_epoch"] is not None:
+                status["status"] = "TRAINING IN PROGRESS"
+            else:
+                status["status"] = "INITIALIZING"
         
-        # Get last few lines for additional context
-        lines = content.strip().split('\n')
-        status["last_lines"] = lines[-10:] if len(lines) > 10 else lines
+        # Get last few lines for additional context (exclude empty lines)
+        lines = [l for l in content.strip().split('\n') if l.strip()]
+        status["last_lines"] = lines[-15:] if len(lines) > 15 else lines
+        
+        # Extract loss components from latest epoch if available
+        if status["latest_epoch"] is not None:
+            latest_epoch_str = f"Epoch {status['latest_epoch']}"
+            # Try to find dice, focal, variance components
+            loss_pattern = r'dice: ([\d.]+), focal: ([\d.]+), variance: ([\d.]+)'
+            loss_match = re.search(loss_pattern, content)
+            if loss_match:
+                status["dice_loss"] = float(loss_match.group(1))
+                status["focal_loss"] = float(loss_match.group(2))
+                status["variance_loss"] = float(loss_match.group(3))
         
     except Exception as e:
         status["error"] = str(e)
@@ -117,36 +142,48 @@ def send_email(status):
             body = f"Error reading training log: {status['error']}"
         else:
             if status['best_val_loss']:
-                subject = f"📊 Training Monitor - Epoch {status['latest_epoch']} | Loss: {float(status['best_val_loss']):.4f}"
+                subject = f"📊 Training Monitor [{status['status']}] - Epoch {status['latest_epoch']} | Best Loss: {float(status['best_val_loss']):.4f}"
             else:
-                subject = "📊 Training Monitor"
+                subject = f"📊 Training Monitor [{status['status']}]"
             
             best_loss_str = f"{float(status['best_val_loss']):.6f}" if status['best_val_loss'] else 'N/A'
             best_epoch_str = str(status['best_epoch']) if status['best_epoch'] is not None else 'N/A'
             
             body = f"""
 TRAINING STATUS UPDATE
-{'='*60}
-Time: {status['current_time']}
-Log: {status['log_file']}
-Status: {status['status']}
+{'='*70}
+Time:                 {status['current_time']}
+Log:                  {status['log_file']}
+Status:               {status['status']}
+Total Epochs Done:    {status.get('total_epochs_completed', 0)}
 
-METRICS
-{'='*60}
-Current Epoch: {status['latest_epoch'] if status['latest_epoch'] is not None else 'N/A'}
-Best Val Loss: {best_loss_str} @ Epoch {best_epoch_str}
-
-VALIDATION LOSS HISTORY (Last 10)
-{'='*60}
+CURRENT METRICS
+{'='*70}
+Current Epoch:        {status['latest_epoch'] if status['latest_epoch'] is not None else 'N/A'}
+Best Val Loss:        {best_loss_str} @ Epoch {best_epoch_str}
 """
-            if status['val_losses']:
-                # Show last 10 validation losses
-                for epoch, val_loss in status['val_losses'][-10:]:
-                    body += f"Epoch {epoch:3d}: {val_loss:.6f}\n"
+            
+            if 'dice_loss' in status:
+                body += f"""
+Loss Components (Latest Epoch):
+  Dice Loss:          {status.get('dice_loss', 'N/A')}
+  Focal Loss:         {status.get('focal_loss', 'N/A')}
+  Variance Loss:      {status.get('variance_loss', 'N/A')}
+"""
             
             body += f"""
-RECENT LOG LINES
-{'='*60}
+VALIDATION LOSS HISTORY (Last 15 epochs)
+{'='*70}
+"""
+            if status['val_losses']:
+                # Show last 15 validation losses
+                for epoch, val_loss in status['val_losses'][-15:]:
+                    marker = " ← BEST" if epoch == status['best_epoch'] else ""
+                    body += f"  Epoch {epoch:3d}: {val_loss:.6f}{marker}\n"
+            
+            body += f"""
+RECENT LOG LINES (Last 15)
+{'='*70}
 """
             for line in status['last_lines']:
                 body += f"{line}\n"
