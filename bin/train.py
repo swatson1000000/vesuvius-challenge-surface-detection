@@ -60,8 +60,10 @@ class VesuviusDataset(Dataset):
         # Normalize image
         image = self._normalize(image)
         
-        # Keep 3-class label (0=background, 1=surface type 1, 2=surface type 2)
-        label = label.astype(np.float32)
+        # Convert to binary: only value 1 (thin surface) is foreground
+        # Value 0 (background) + Value 2 (thick surface) both -> 0
+        # Value 1 (thin surface) -> 1
+        label = (label == 1).astype(np.float32)
         
         # Extract patch if needed
         if image.shape != self.patch_size:

@@ -49,13 +49,15 @@ ls -lth log/train_*.log | head -5
 **ALWAYS** run inference with nohup in the background, logging to the `log/` directory with timestamp:
 
 ```bash
-nohup bash -c "eval \"\$(conda shell.bash hook)\" && conda activate phi4 && cd /home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/bin && python inference.py --checkpoint checkpoints/fold_0/checkpoint_epoch_40.pth --input ../test_images/ --output ../predictions/ --device cuda" > log/inference_$(date +%Y%m%d_%H%M%S).log 2>&1 &
+nohup bash -c "eval \"\$(conda shell.bash hook)\" && conda activate phi4 && cd /home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/bin && python inference.py --checkpoint checkpoints/fold_0/best_model.pth --input ../train_images_sample/ --output ../predictions/ --device cuda" > log/inference_$(date +%Y%m%d_%H%M%S).log 2>&1 &
 ```
 
 ### Inference Parameters
 
-- `--checkpoint`: Path to model checkpoint (e.g., `checkpoints/fold_0/checkpoint_epoch_40.pth`)
-- `--input`: Path to input directory or file
+- `--checkpoint`: Path to model checkpoint (e.g., `checkpoints/fold_0/best_model.pth`)
+  - Use `best_model.pth` for the best trained model from 3-class learning
+  - Use `checkpoint_epoch_N.pth` for specific epoch checkpoints
+- `--input`: Path to input directory (e.g., `../train_images_sample/` for 50 sample images, or `../test_images/` for test set)
 - `--output`: Path to output directory
 - `--device`: Device to use (`cuda` or `cpu`)
 - `--patch_size`: Patch size for inference (default: `128 128 128`)
@@ -65,6 +67,12 @@ nohup bash -c "eval \"\$(conda shell.bash hook)\" && conda activate phi4 && cd /
 - `--max_hole_size`: Maximum hole size to fill in voxels (default: `50`)
 - `--kernel_size`: Morphological kernel size (default: `2`)
 - `--separate_instances`: Apply instance separation (flag)
+
+### Sample Inference (50 Training Images)
+Contains 50 representative training images from the dataset for quick validation:
+```bash
+nohup bash -c "eval \"\$(conda shell.bash hook)\" && conda activate phi4 && cd /home/swatson/work/MachineLearning/kaggle/vesuvius-challenge-surface-detection/bin && python inference.py --checkpoint checkpoints/fold_0/best_model.pth --input ../train_images_sample/ --output ../predictions_sample/ --device cuda" > log/inference_$(date +%Y%m%d_%H%M%S).log 2>&1 &
+```
 
 ### Monitoring Inference
 
